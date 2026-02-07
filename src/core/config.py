@@ -5,19 +5,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+psycopg://lilith:lilith@localhost:5432/lilith_emails"
-    EMBEDDING_URL: str = "http://127.0.0.1:6003"
+    DATABASE_URL: str
+    EMBEDDING_URL: str = ""
     EMAIL_ENCRYPTION_KEY: str = ""
     GOOGLE_CLOUD_PROJECT: str = ""
-    PUBSUB_TOPIC: str = "gmail-notifications"
+    PUBSUB_TOPIC: str = ""
     GMAIL_SCOPES: List[str] = [
         "https://www.googleapis.com/auth/gmail.readonly",
     ]
-    VLLM_URL: str = "http://127.0.0.1:6001/v1"
-    VLLM_MODEL: str = "Qwen3-8B-AWQ"
-    SPACY_API_URL: str = "http://127.0.0.1:6004"
-    FASTTEXT_LANGDETECT_URL: str = "http://127.0.0.1:6005"
-    WEBHOOK_URL: str = "https://your-domain.com/webhook/gmail"
+    VLLM_URL: str = ""
+    VLLM_MODEL: str = ""
+    SPACY_API_URL: str = ""
+    FASTTEXT_LANGDETECT_URL: str = ""
+    WEBHOOK_URL: str = ""
     MCP_EMAIL_ACCOUNT_ID: Optional[int] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
