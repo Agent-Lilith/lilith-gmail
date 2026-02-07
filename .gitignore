@@ -15,3 +15,6 @@ credentials.json
 
 # Transform run logs (latest at bottom by name)
 logs/
+
+# Generated
+.capabilities.json
