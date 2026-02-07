@@ -1,0 +1,33 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: lilith-email-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: lilith
+      POSTGRES_PASSWORD: Jz3jesZlO6FV6HzF2hra37Jlvl+Oc1FJBP1tme5qcYk=
+      POSTGRES_DB: lilith_emails
+    volumes:
+      - /mnt/backup/postgres/lilith-emails:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lilith -d lilith_emails"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # sync-daemon:
+  #   build: .
+  #   container_name: lilith-email-sync
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     DATABASE_URL: postgresql+psycopg://lilith:Jz3jesZlO6FV6HzF2hra37Jlvl+Oc1FJBP1tme5qcYk=@db:5432/lilith_emails
+  #     EMAIL_ENCRYPTION_KEY: ${EMAIL_ENCRYPTION_KEY}
+  #     GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+  #     EMBEDDING_URL: ${EMBEDDING_URL:-}
+  #     VLLM_URL: ${VLLM_URL:-http://localhost:6001/v1}
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   command: uv run uvicorn daemon.app:app --host 0.0.0.0 --port 8000
