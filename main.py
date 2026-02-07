@@ -77,7 +77,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         creds = ensure_valid_credentials(creds)
         gmail = GmailClient(creds)
         worker = SyncWorker(gmail, db)
-        limit = None if args.limit == 0 else (args.limit if args.limit is not None else 1000)
+        limit = args.limit if (args.limit is not None and args.limit != 0) else None
         asyncio.run(
             worker.full_sync(
                 account.id,
@@ -543,7 +543,7 @@ def main() -> int:
 
     sync_p = sub.add_parser("sync", help="Download emails from Gmail (raw only); then run transform")
     sync_p.add_argument("account_id", type=int, help="Account ID")
-    sync_p.add_argument("-n", "--limit", type=int, default=None, metavar="N", help="Max messages (default: 1000, 0 = no limit)")
+    sync_p.add_argument("-n", "--limit", type=int, default=None, metavar="N", help="Optional cap on messages (default: no limit)")
     sync_p.add_argument("-j", "--concurrency", type=int, default=10, metavar="N", help="Concurrent API calls (default: 10)")
     sync_p.set_defaults(func=cmd_sync)
 
