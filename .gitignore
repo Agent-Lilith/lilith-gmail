@@ -17,4 +17,4 @@ credentials.json
 logs/
 
 # Generated
-.capabilities.json
+capabilities.json
