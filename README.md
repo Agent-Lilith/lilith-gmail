@@ -83,9 +83,9 @@ uv run mcp --transport streamable-http --port 6201
 
 | Tool | Description |
 |------|-------------|
-| `search_emails` | Search by natural language + optional filters (from_email, labels, has_attachments, date_after, date_before, limit). Returns list of email dicts. |
-| `get_email` | Fetch one email by Gmail message ID. Returns email dict or error. |
-| `get_email_thread` | Fetch all messages in a thread by thread_id. Returns thread dict with `messages` list. |
-| `summarize_emails` | Summarize by `thread_id` or `email_ids`. Returns a short summary string. |
+| `emails_search` | Search by natural language + optional filters (from_email, labels, has_attachments, date_after, date_before, limit). Returns list of email dicts. |
+| `email_get` | Fetch one email by Gmail message ID. Returns email dict or error. |
+| `email_get_thread` | Fetch all messages in a thread by thread_id. Returns thread dict with `messages` list. |
+| `emails_summarize` | Summarize by `thread_id` or `email_ids`. Returns a short summary string. |
 
 All responses use **external** privacy: SENSITIVE content is redacted, PERSONAL content is shown sanitized.

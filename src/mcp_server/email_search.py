@@ -1,3 +1,4 @@
+from datetime import date, datetime, time
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, select
@@ -9,6 +10,19 @@ from core.models import AccountLabel, Email
 from .external_format import external_email_to_dict, to_external_email
 
 PRIVACY_MODE_EXTERNAL = "external"
+
+
+def _parse_date_bound(s: str, end_of_day: bool = False) -> datetime:
+    """Parse date_after/date_before string to datetime for DB comparison."""
+    s = s.strip()
+    if "T" in s or " " in s:
+        # ISO datetime; normalize Z to +00:00 for fromisoformat
+        s = s.replace("Z", "+00:00")
+        return datetime.fromisoformat(s)
+    d = date.fromisoformat(s)
+    if end_of_day:
+        return datetime.combine(d, time(23, 59, 59, 999999))
+    return datetime.combine(d, time(0, 0, 0))
 
 
 def _transformed_only(stmt):
@@ -54,9 +68,11 @@ class EmailSearchEngine:
         if "has_attachments" in filters:
             stmt = stmt.where(Email.has_attachments == filters["has_attachments"])
         if filters.get("date_after"):
-            stmt = stmt.where(Email.sent_at >= filters["date_after"])
+            stmt = stmt.where(Email.sent_at >= _parse_date_bound(filters["date_after"]))
         if filters.get("date_before"):
-            stmt = stmt.where(Email.sent_at <= filters["date_before"])
+            stmt = stmt.where(
+                Email.sent_at <= _parse_date_bound(filters["date_before"], end_of_day=True)
+            )
 
         query_embedding = self.embedder.encode_sync(query)
         if query_embedding and any(x != 0 for x in query_embedding):

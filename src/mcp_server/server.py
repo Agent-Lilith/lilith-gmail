@@ -31,7 +31,7 @@ mcp = _create_mcp()
 
 
 @mcp.tool()
-def search_emails_tool(
+def emails_search(
     query: str,
     from_email: str | None = None,
     labels: list[str] | None = None,
@@ -39,7 +39,8 @@ def search_emails_tool(
     date_after: str | None = None,
     date_before: str | None = None,
     limit: int = 10,
-) -> list[dict]:
+    account_id: int | None = None,
+) -> dict:
     return search_emails(
         query=query,
         from_email=from_email,
@@ -48,25 +49,31 @@ def search_emails_tool(
         date_after=date_after,
         date_before=date_before,
         limit=limit,
+        account_id=account_id,
     )
 
 
 @mcp.tool()
-def get_email_tool(email_id: str) -> dict:
-    return get_email(email_id)
+def email_get(email_id: str, account_id: int | None = None) -> dict:
+    return get_email(email_id, account_id=account_id)
 
 
 @mcp.tool()
-def get_email_thread_tool(thread_id: str) -> dict:
-    return get_email_thread(thread_id)
+def email_get_thread(thread_id: str, account_id: int | None = None) -> dict:
+    return get_email_thread(thread_id, account_id=account_id)
 
 
 @mcp.tool()
-def summarize_emails(
+def emails_summarize(
     email_ids: list[str] | None = None,
     thread_id: str | None = None,
-) -> str:
-    return summarize_emails_tool(email_ids=email_ids, thread_id=thread_id)
+    account_id: int | None = None,
+) -> dict:
+    return summarize_emails_tool(
+        email_ids=email_ids,
+        thread_id=thread_id,
+        account_id=account_id,
+    )
 
 
 def main(
@@ -77,10 +84,10 @@ def main(
         mcp.run(transport="stdio")
     else:
         app = _create_mcp(host="0.0.0.0", port=port)
-        app.tool()(search_emails_tool)
-        app.tool()(get_email_tool)
-        app.tool()(get_email_thread_tool)
-        app.tool()(summarize_emails)
+        app.tool()(emails_search)
+        app.tool()(email_get)
+        app.tool()(email_get_thread)
+        app.tool()(emails_summarize)
         import asyncio
         import uvicorn
         from contextlib import asynccontextmanager

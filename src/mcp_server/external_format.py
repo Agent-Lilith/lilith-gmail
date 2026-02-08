@@ -10,6 +10,9 @@ BODY_SENSITIVE_PLACEHOLDER = "[SENSITIVE CONTENT REDACTED]"
 BODY_REDACTED_FALLBACK = "[REDACTED CONTENT]"
 SNIPPET_NOT_PROCESSED = ""
 
+# Gmail web URL: opens the message in browser; on Android often offers "Open in Gmail app"
+GMAIL_INBOX_URL_TEMPLATE = "https://mail.google.com/mail/u/0/#inbox/{message_id}"
+
 
 class ExternalEmail(BaseModel):
     id: str = Field(description="Gmail message ID")
@@ -22,6 +25,10 @@ class ExternalEmail(BaseModel):
     body: str = Field(default="", description="Redacted or placeholder body only")
     labels: List[str] = Field(default_factory=list)
     has_attachments: bool = False
+    gmail_url: str = Field(
+        default="",
+        description="URL to open this email in Gmail (web or app). Use for 'Open in Gmail' links.",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -49,6 +56,8 @@ def to_external_email(
     )
     date_str = email.sent_at.isoformat() if email.sent_at else None
 
+    gmail_url = GMAIL_INBOX_URL_TEMPLATE.format(message_id=email.gmail_id)
+
     return ExternalEmail(
         id=email.gmail_id,
         thread_id=email.gmail_thread_id,
@@ -60,6 +69,7 @@ def to_external_email(
         body=body or "",
         labels=labels_display,
         has_attachments=email.has_attachments or False,
+        gmail_url=gmail_url,
     )
 
 

@@ -566,6 +566,7 @@ def main() -> int:
     get_email_p.add_argument("email_id", help="Database id (int) or Gmail message id")
     get_email_p.add_argument("--full", action="store_true", help="Full body (default: truncate 2000)")
     get_email_p.add_argument("--raw", action="store_true", help="Original body_text (default: sanitized for PERSONAL)")
+    get_email_p.epilog = "Body is plain text only; links from the HTML version in Gmail are not shown."
     get_email_p.set_defaults(func=cmd_get_email)
 
     check_p = sub.add_parser("check-account", help="Print token scopes (debug 403)")

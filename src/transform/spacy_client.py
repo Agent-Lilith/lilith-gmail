@@ -10,13 +10,24 @@ logger = logging.getLogger(__name__)
 
 REDACT_LABELS = {"PERSON", "GPE", "LOC", "FAC", "ORG"}
 
+# NER often mislabels contractions as PERSON; skip redacting these spans
+PERSON_FALSE_POSITIVE_SPANS = frozenset(
+    s.upper()
+    for s in (
+        "can't", "don't", "won't", "isn't", "aren't", "wasn't", "weren't",
+        "hasn't", "hadn't", "couldn't", "shouldn't", "wouldn't", "doesn't",
+        "didn't", "cannot", "cant", "dont", "wont", "isnt",
+    )
+)
+MIN_PERSON_SPAN_LEN = 4  # skip PERSON entities shorter than this (e.g. "AI", "Jo")
+
 # Keys, tokens, SSH blocks, API secrets; order matters (more specific first)
 SENSITIVE_PATTERNS: List[tuple[re.Pattern, str]] = [
     (re.compile(r"-----BEGIN (?:OPENSSH |RSA |DSA |EC |)PRIVATE KEY-----[\s\S]*?-----END (?:OPENSSH |RSA |DSA |EC |)PRIVATE KEY-----", re.IGNORECASE), "[REDACTED]"),
     (re.compile(r"Bearer\s+[A-Za-z0-9\-_.~+/]+=*", re.IGNORECASE), "[REDACTED]"),
     (re.compile(r"access_token[\s=:]+[\w\-.]+\.[\w\-.]+\.[\w\-]+", re.IGNORECASE), "access_token=[REDACTED]"),
     (re.compile(r"(?:api[_-]?key|apikey|api_secret|secret_key|auth[_-]?token)[\s=:]+[\w\-~./+=]+", re.IGNORECASE), "[REDACTED]"),
-    (re.compile(r"(?:password|passwd|pwd|token)[\s=:]+[\S]+", re.IGNORECASE), "[REDACTED]"),
+    (re.compile(r"(?:password|passwd|pwd|token)[\s]*[=:][\s]*[\S]+", re.IGNORECASE), "[REDACTED]"),
     (re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}(?:-[A-Z0-9]{4})*\b", re.IGNORECASE), "[REDACTED]"),
     (re.compile(r"\b[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}(?:-[A-Z0-9]{5})*\b", re.IGNORECASE), "[REDACTED]"),
     (re.compile(r"\b[A-Fa-f0-9]{32,}\b"), "[REDACTED]"),
@@ -64,10 +75,14 @@ def get_entities(text: str, lang: str = "en") -> List[dict]:
     return out
 
 
+# Replace URLs with [LINK] before token redaction so verification/reset links
+# don't get wiped by long-token patterns and leave the body unreadable
+_URL_PATTERN = re.compile(r"https?://\S+")
+
 def redact_sensitive_patterns(text: str) -> str:
     if not text:
         return ""
-    out = text
+    out = _URL_PATTERN.sub("[LINK]", text)
     for pattern, replacement in SENSITIVE_PATTERNS:
         out = pattern.sub(replacement, out)
     return out
@@ -98,6 +113,12 @@ def sanitize_with_spacy_api(body: str, lang: str = "en") -> str:
         label = e.get("label") or "ENTITY"
         if start is None or end is None or start < 0 or end > len(sanitized):
             continue
+        span_text = sanitized[start:end]
+        if label == "PERSON":
+            if len(span_text) < MIN_PERSON_SPAN_LEN:
+                continue
+            if span_text.upper().strip() in PERSON_FALSE_POSITIVE_SPANS:
+                continue
         sanitized = sanitized[:start] + f"[{label}]" + sanitized[end:]
     return sanitized
 
