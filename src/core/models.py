@@ -3,6 +3,7 @@ from typing import List, Optional
 from sqlalchemy import Integer, String, Text, Boolean, DateTime, BigInteger, ARRAY, ForeignKey, Float
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from pgvector.sqlalchemy import Vector
 
 EMBEDDING_DIM = 768
@@ -82,6 +83,8 @@ class Email(Base):
     subject_embedding: Mapped[Optional[Vector]] = mapped_column(Vector(EMBEDDING_DIM))
     body_embedding: Mapped[Optional[Vector]] = mapped_column(Vector(EMBEDDING_DIM))
     body_pooled_embedding: Mapped[Optional[Vector]] = mapped_column(Vector(EMBEDDING_DIM))
+
+    search_tsv = mapped_column(TSVECTOR, nullable=True)
 
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

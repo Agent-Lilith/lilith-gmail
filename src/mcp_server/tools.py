@@ -1,90 +1,86 @@
-"""Email tools for Lilith / MCP.
+"""Email MCP tools: hybrid search, get, thread, summarize, capabilities.
 
-Return shape (ToolResult): On success {"success": True, "output": str}. On failure {"success": False, "error": str}.
-No error payload inside output; errors only in error field.
-
-Every tool accepts optional account_id: int | None. If omitted, uses MCP_EMAIL_ACCOUNT_ID.
-
-Sync implementations; callers must run in thread pool (e.g. asyncio.to_thread) to avoid blocking.
-
-Interface:
-  emails_search       Params: query, from_email?, labels?, has_attachments?, date_after?, date_before?, limit?, account_id?
-    Success: output = JSON array of email dicts. Error: e.g. "Search failed: ..."
-  email_get           Params: email_id, account_id?
-    Success: output = JSON object. Error: "Email not found" or "Failed to get email: ..."
-  email_get_thread    Params: thread_id, account_id?
-    Success: output = JSON {thread_id, subject, message_count, messages}. Error: "Thread not found" or "..."
-  emails_summarize    Params: email_ids?, thread_id?, account_id?
-    Success: output = human-readable summary text. Error: "No emails or thread specified..." or "Summarization failed: ..."
+Return shape (ToolResult): { "success": true, "output": str } or { "success": false, "error": str }.
+Sync implementations; callers must run in thread pool to avoid blocking.
 """
+
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.config import settings as core_settings
 from core.database import db_session
 from core.embeddings import Embedder
-from mcp_server.email_search import EmailSearchEngine
+from mcp_server.hybrid_search import HybridEmailSearchEngine
 from mcp_server.summarization import summarize_emails
 
 logger = logging.getLogger(__name__)
 
-ToolResult = Dict[str, Any]
+ToolResult = dict[str, Any]
 
 
-def _resolve_account_id(account_id: Optional[int]) -> Optional[int]:
+def _resolve_account_id(account_id: int | None) -> int | None:
     return account_id if account_id is not None else core_settings.MCP_EMAIL_ACCOUNT_ID
 
 
-def search_emails(
-    query: str,
-    from_email: Optional[str] = None,
-    labels: Optional[List[str]] = None,
-    has_attachments: Optional[bool] = None,
-    date_after: Optional[str] = None,
-    date_before: Optional[str] = None,
-    limit: int = 10,
-    account_id: Optional[int] = None,
+def get_search_capabilities() -> dict[str, Any]:
+    """Return capabilities for this email search server."""
+    return {
+        "schema_version": "1.0",
+        "source_name": "email",
+        "source_class": "personal",
+        "supported_methods": ["structured", "fulltext", "vector"],
+        "supported_filters": [
+            {"name": "from_email", "type": "string", "operators": ["eq", "contains"], "description": "Sender email address"},
+            {"name": "to_email", "type": "string", "operators": ["eq", "contains"], "description": "Recipient email address"},
+            {"name": "labels", "type": "string[]", "operators": ["in"], "description": "Gmail label IDs or names"},
+            {"name": "has_attachments", "type": "boolean", "operators": ["eq"], "description": "Has attachments filter"},
+            {"name": "date_after", "type": "date", "operators": ["gte"], "description": "Emails sent on or after this date (ISO format)"},
+            {"name": "date_before", "type": "date", "operators": ["lte"], "description": "Emails sent on or before this date (ISO format)"},
+            {"name": "account_id", "type": "integer", "operators": ["eq"], "description": "Restrict to specific email account"},
+        ],
+        "max_limit": 100,
+        "default_limit": 10,
+        "sort_fields": ["sent_at", "relevance"],
+        "default_ranking": "vector",
+    }
+
+
+def search_emails_unified(
+    query: str = "",
+    methods: list[str] | None = None,
+    filters: list[dict] | None = None,
+    top_k: int = 10,
+    include_scores: bool = True,
+    account_id: int | None = None,
 ) -> ToolResult:
+    """Hybrid search over emails."""
     try:
-        filters: Dict[str, Any] = {}
-        if from_email:
-            filters["from"] = from_email
-        if labels:
-            filters["labels"] = labels
-        if has_attachments is not None:
-            filters["has_attachments"] = has_attachments
-        if date_after:
-            filters["date_after"] = date_after
-        if date_before:
-            filters["date_before"] = date_before
-        limit = min(max(1, limit), 50)
+        aid = _resolve_account_id(account_id)
+        top_k = min(max(1, top_k), 100)
 
         with db_session() as db:
-            engine = EmailSearchEngine(db, Embedder())
-            results = engine.search(
+            engine = HybridEmailSearchEngine(db, Embedder())
+            response = engine.search(
                 query=query,
-                account_id=_resolve_account_id(account_id),
+                methods=methods,
                 filters=filters,
-                limit=limit,
+                account_id=aid,
+                top_k=top_k,
+                include_scores=include_scores,
             )
-        return {"success": True, "output": json.dumps(results)}
+
+        return {"success": True, "output": json.dumps(response)}
     except Exception as e:
-        logger.exception("search_emails failed")
+        logger.exception("unified_search failed")
         return {"success": False, "error": f"Search failed: {e!s}"}
 
 
-def get_email(
-    email_id: str,
-    account_id: Optional[int] = None,
-) -> ToolResult:
+def get_email(email_id: str, account_id: int | None = None) -> ToolResult:
     try:
         with db_session() as db:
-            engine = EmailSearchEngine(db, Embedder())
-            result = engine.get_by_id(
-                email_id,
-                account_id=_resolve_account_id(account_id),
-            )
+            engine = HybridEmailSearchEngine(db, Embedder())
+            result = engine.get_by_id(email_id, account_id=_resolve_account_id(account_id))
         if result is None:
             return {"success": False, "error": "Email not found"}
         return {"success": True, "output": json.dumps(result)}
@@ -93,17 +89,11 @@ def get_email(
         return {"success": False, "error": f"Failed to get email: {e!s}"}
 
 
-def get_email_thread(
-    thread_id: str,
-    account_id: Optional[int] = None,
-) -> ToolResult:
+def get_email_thread(thread_id: str, account_id: int | None = None) -> ToolResult:
     try:
         with db_session() as db:
-            engine = EmailSearchEngine(db, Embedder())
-            result = engine.get_thread(
-                thread_id,
-                account_id=_resolve_account_id(account_id),
-            )
+            engine = HybridEmailSearchEngine(db, Embedder())
+            result = engine.get_thread(thread_id, account_id=_resolve_account_id(account_id))
         if result is None:
             return {"success": False, "error": "Thread not found"}
         return {"success": True, "output": json.dumps(result)}
@@ -113,14 +103,14 @@ def get_email_thread(
 
 
 def summarize_emails_tool(
-    email_ids: Optional[List[str]] = None,
-    thread_id: Optional[str] = None,
-    account_id: Optional[int] = None,
+    email_ids: list[str] | None = None,
+    thread_id: str | None = None,
+    account_id: int | None = None,
 ) -> ToolResult:
     try:
         aid = _resolve_account_id(account_id)
         with db_session() as db:
-            engine = EmailSearchEngine(db, Embedder())
+            engine = HybridEmailSearchEngine(db, Embedder())
             if thread_id:
                 data = engine.get_thread(thread_id, account_id=aid)
                 emails = data["messages"] if data else []

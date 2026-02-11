@@ -4,11 +4,11 @@ Gmail sync daemon + Lilith agent tools for semantic email search, with privacy-a
 
 ## Quick Start
 
-### 1. Start database
+### 1. Database (shared Postgres)
 
-```bash
-docker compose up -d db
-```
+This project uses a **shared** PostgreSQL server. Database name for this app: `lilith_emails`.
+
+Ensure the shared Postgres (with pgvector) is running. Clone the lilith-compose project first.
 
 ### 2. Run migrations
 
@@ -79,7 +79,7 @@ uv run mcp
 uv run mcp --transport streamable-http --port 6201
 ```
 
-### Tools
+### MCP Tools
 
 | Tool | Description |
 |------|-------------|
