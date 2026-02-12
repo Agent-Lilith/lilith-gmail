@@ -20,13 +20,6 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _create_index_concurrently(connection: object, index_sql: str) -> None:
-    """Run CREATE INDEX CONCURRENTLY outside a transaction (PostgreSQL requirement)."""
-    engine = connection.engine
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as ac_conn:
-        ac_conn.execute(text(index_sql))
-
-
 def upgrade() -> None:
     # Add tsvector column
     op.execute("ALTER TABLE emails ADD COLUMN search_tsv tsvector")
@@ -45,9 +38,11 @@ def upgrade() -> None:
     """)
 
     # GIN index for fast fulltext lookup (must run outside transaction)
-    _create_index_concurrently(
-        op.get_bind(),
-        "CREATE INDEX CONCURRENTLY ix_emails_search_tsv ON emails USING GIN (search_tsv)",
+    op.create_index(
+        "ix_emails_search_tsv",
+        "emails",
+        ["search_tsv"],
+        postgresql_using="gin",
     )
 
     # Trigger to auto-update tsvector on INSERT or UPDATE
