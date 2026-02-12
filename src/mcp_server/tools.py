@@ -23,7 +23,7 @@ def _resolve_account_id(account_id: int | None) -> int | None:
     return account_id if account_id is not None else core_settings.MCP_EMAIL_ACCOUNT_ID
 
 
-def get_search_capabilities() -> dict[str, Any]:
+def get_search_capabilities_tool() -> dict[str, Any]:
     """Return capabilities for this email search server."""
     return {
         "schema_version": "1.0",
@@ -46,84 +46,66 @@ def get_search_capabilities() -> dict[str, Any]:
     }
 
 
-def search_emails_unified(
+def search_emails_unified_tool(
     query: str = "",
     methods: list[str] | None = None,
     filters: list[dict] | None = None,
     top_k: int = 10,
-    include_scores: bool = True,
     account_id: int | None = None,
-) -> ToolResult:
+) -> dict:
     """Hybrid search over emails."""
-    try:
-        aid = _resolve_account_id(account_id)
-        top_k = min(max(1, top_k), 100)
+    aid = _resolve_account_id(account_id)
+    top_k = min(max(1, top_k), 100)
 
-        with db_session() as db:
-            engine = HybridEmailSearchEngine(db, Embedder())
-            response = engine.search(
-                query=query,
-                methods=methods,
-                filters=filters,
-                account_id=aid,
-                top_k=top_k,
-                include_scores=include_scores,
-            )
-
-        return {"success": True, "output": json.dumps(response)}
-    except Exception as e:
-        logger.exception("unified_search failed")
-        return {"success": False, "error": f"Search failed: {e!s}"}
+    with db_session() as db:
+        engine = HybridEmailSearchEngine(db, Embedder())
+        response = engine.search(
+            query=query,
+            methods=methods,
+            filters=filters,
+            account_id=aid,
+            top_k=top_k,
+        )
+    return response
 
 
-def get_email(email_id: str, account_id: int | None = None) -> ToolResult:
-    try:
-        with db_session() as db:
-            engine = HybridEmailSearchEngine(db, Embedder())
-            result = engine.get_by_id(email_id, account_id=_resolve_account_id(account_id))
-        if result is None:
-            return {"success": False, "error": "Email not found"}
-        return {"success": True, "output": json.dumps(result)}
-    except Exception as e:
-        logger.exception("get_email failed")
-        return {"success": False, "error": f"Failed to get email: {e!s}"}
+def get_email_tool(email_id: str, account_id: int | None = None) -> dict:
+    with db_session() as db:
+        engine = HybridEmailSearchEngine(db, Embedder())
+        result = engine.get_by_id(email_id, account_id=_resolve_account_id(account_id))
+    if result is None:
+        raise ValueError("Email not found")
+    return result
 
 
-def get_email_thread(thread_id: str, account_id: int | None = None) -> ToolResult:
-    try:
-        with db_session() as db:
-            engine = HybridEmailSearchEngine(db, Embedder())
-            result = engine.get_thread(thread_id, account_id=_resolve_account_id(account_id))
-        if result is None:
-            return {"success": False, "error": "Thread not found"}
-        return {"success": True, "output": json.dumps(result)}
-    except Exception as e:
-        logger.exception("get_email_thread failed")
-        return {"success": False, "error": f"Failed to get thread: {e!s}"}
+def get_email_thread_tool(thread_id: str, account_id: int | None = None) -> dict:
+    with db_session() as db:
+        engine = HybridEmailSearchEngine(db, Embedder())
+        result = engine.get_thread(thread_id, account_id=_resolve_account_id(account_id))
+    if result is None:
+        raise ValueError("Thread not found")
+    return result
 
 
 def summarize_emails_tool(
     email_ids: list[str] | None = None,
     thread_id: str | None = None,
     account_id: int | None = None,
-) -> ToolResult:
-    try:
-        aid = _resolve_account_id(account_id)
-        with db_session() as db:
-            engine = HybridEmailSearchEngine(db, Embedder())
-            if thread_id:
-                data = engine.get_thread(thread_id, account_id=aid)
-                emails = data["messages"] if data else []
-            elif email_ids:
-                emails = []
-                for eid in email_ids:
-                    e = engine.get_by_id(eid, account_id=aid)
-                    if e:
-                        emails.append(e)
-            else:
-                return {"success": False, "error": "No emails or thread specified. Provide thread_id or email_ids."}
-        summary = summarize_emails(emails)
-        return {"success": True, "output": summary}
-    except Exception as e:
-        logger.exception("summarize_emails failed")
-        return {"success": False, "error": f"Summarization failed: {e!s}"}
+) -> dict:
+    aid = _resolve_account_id(account_id)
+    with db_session() as db:
+        engine = HybridEmailSearchEngine(db, Embedder())
+        if thread_id:
+            data = engine.get_thread(thread_id, account_id=aid)
+            emails = data["messages"] if data else []
+        elif email_ids:
+            emails = []
+            for eid in email_ids:
+                e = engine.get_by_id(eid, account_id=aid)
+                if e:
+                    emails.append(e)
+        else:
+            raise ValueError("No emails or thread specified.")
+    
+    summary = summarize_emails(emails)
+    return {"summary": summary}

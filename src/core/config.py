@@ -1,27 +1,17 @@
+from common.config import BaseAgentSettings
 from typing import List, Optional
 
-from cryptography.fernet import Fernet
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class Settings(BaseSettings):
-    DATABASE_URL: str
-    EMBEDDING_URL: str = ""
+class Settings(BaseAgentSettings):
     EMAIL_ENCRYPTION_KEY: str = ""
     GOOGLE_CLOUD_PROJECT: str = ""
     PUBSUB_TOPIC: str = ""
     GMAIL_SCOPES: List[str] = [
         "https://www.googleapis.com/auth/gmail.readonly",
     ]
-    VLLM_URL: str = ""
-    VLLM_MODEL: str = ""
     SPACY_API_URL: str = ""
     FASTTEXT_LANGDETECT_URL: str = ""
     WEBHOOK_URL: str = ""
     MCP_EMAIL_ACCOUNT_ID: Optional[int] = None
-
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
 
 settings = Settings()
 

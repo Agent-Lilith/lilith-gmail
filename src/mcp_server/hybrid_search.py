@@ -130,187 +130,46 @@ def _email_to_result_dict(
     }
 
 
-class HybridEmailSearchEngine:
-    """Runs structured, fulltext, and vector search in parallel, merges results."""
+from common.search import BaseHybridSearchEngine
+
+class HybridEmailSearchEngine(BaseHybridSearchEngine[Email]):
+    """Hybrid search engine for emails using lilith-core."""
 
     def __init__(self, db: Session, embedder: Embedder) -> None:
-        self.db = db
-        self.embedder = embedder
+        super().__init__(db, embedder)
 
-    def search(
-        self,
-        query: str = "",
-        methods: list[str] | None = None,
-        filters: list[dict[str, Any]] | None = None,
-        account_id: int | None = None,
-        top_k: int = 10,
-        include_scores: bool = True,
-    ) -> dict[str, Any]:
-        """Execute hybrid search and return UnifiedSearchResponse-compatible dict."""
-        top_k = min(max(1, top_k), 100)
+    def _get_item_id(self, item: Email) -> str:
+        return item.gmail_id
 
-        # Auto-select methods if not specified
-        if methods is None:
-            methods = self._auto_select_methods(query, filters)
-
-        logger.info(
-            "HybridEmailSearch: methods=%s, query=%r, filters=%s, top_k=%s",
-            methods, query[:80] if query else "", len(filters or []), top_k,
-        )
-
-        all_results: dict[str, dict[str, Any]] = {}  # gmail_id -> result
-        methods_executed: list[str] = []
-        timing_ms: dict[str, float] = {}
-
-        if "structured" in methods and filters:
-            t0 = time.monotonic()
-            structured_results = self._structured_search(filters, account_id, top_k)
-            timing_ms["structured"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("structured")
-            for email, score in structured_results:
-                gid = email.gmail_id
-                if gid not in all_results:
-                    all_results[gid] = {"email": email, "scores": {}, "methods": []}
-                all_results[gid]["scores"]["structured"] = score
-                all_results[gid]["methods"].append("structured")
-
-        if "fulltext" in methods and query.strip():
-            t0 = time.monotonic()
-            fulltext_results = self._fulltext_search(query, filters, account_id, top_k)
-            timing_ms["fulltext"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("fulltext")
-            for email, score in fulltext_results:
-                gid = email.gmail_id
-                if gid not in all_results:
-                    all_results[gid] = {"email": email, "scores": {}, "methods": []}
-                all_results[gid]["scores"]["fulltext"] = score
-                if "fulltext" not in all_results[gid]["methods"]:
-                    all_results[gid]["methods"].append("fulltext")
-
-        if "vector" in methods and query.strip():
-            t0 = time.monotonic()
-            vector_results = self._vector_search(query, filters, account_id, top_k)
-            timing_ms["vector"] = round((time.monotonic() - t0) * 1000, 1)
-            methods_executed.append("vector")
-            for email, score in vector_results:
-                gid = email.gmail_id
-                if gid not in all_results:
-                    all_results[gid] = {"email": email, "scores": {}, "methods": []}
-                all_results[gid]["scores"]["vector"] = score
-                if "vector" not in all_results[gid]["methods"]:
-                    all_results[gid]["methods"].append("vector")
-
-        # Build label maps for all results
-        account_ids = list({r["email"].account_id for r in all_results.values()})
-        label_maps = _load_label_maps(self.db, account_ids)
-
-        # Score fusion: weighted aggregate
-        weights = {"structured": 1.0, "fulltext": 0.85, "vector": 0.7}
-        scored_results: list[tuple[float, dict[str, Any]]] = []
-        for gid, data in all_results.items():
-            total_w = 0.0
-            total_s = 0.0
-            for method, score in data["scores"].items():
-                w = weights.get(method, 0.5)
-                total_w += w
-                total_s += score * w
-            final = total_s / total_w if total_w > 0 else 0.0
-
-            result_dict = _email_to_result_dict(
-                data["email"], label_maps, data["scores"], data["methods"],
-            )
-            scored_results.append((final, result_dict))
-
-        # Sort by fused score descending
-        scored_results.sort(key=lambda x: -x[0])
-        results = [r for _, r in scored_results[:top_k]]
-
-        logger.info(
-            "HybridEmailSearch complete: %s results, methods=%s, timing=%s",
-            len(results), methods_executed, timing_ms,
-        )
-
-        return {
-            "results": results,
-            "total_available": len(all_results),
-            "methods_executed": methods_executed,
-            "timing_ms": timing_ms,
-            "error": None,
-        }
-
-    def _auto_select_methods(self, query: str, filters: list[dict] | None) -> list[str]:
-        """Determine which methods to run based on query and filters."""
-        methods = []
-        has_filters = bool(filters)
-        has_query = bool(query and query.strip())
-
-        if has_filters:
-            methods.append("structured")
-        if has_query:
-            methods.append("fulltext")
-            methods.append("vector")
-
-        # Fallback: if nothing selected, do vector with a generic recent query
-        if not methods:
-            methods = ["structured"]
-
-        return methods
-
-    def _structured_search(
-        self,
-        filters: list[dict[str, Any]] | None,
-        account_id: int | None,
-        limit: int,
-    ) -> list[tuple[Email, float]]:
-        """Pure SQL filter search, ordered by recency."""
+    def _structured(self, filters: list[dict] | None, limit: int) -> list[tuple[Email, float]]:
         stmt = select(Email)
-        stmt = _apply_filters(stmt, filters, account_id)
+        stmt = _apply_filters(stmt, filters, None)
         stmt = stmt.order_by(Email.sent_at.desc().nullslast()).limit(limit)
-
         rows = self.db.execute(stmt).scalars().all()
-        # Score by position (exact match gets high score)
         return [(row, max(0.3, 1.0 - i * 0.03)) for i, row in enumerate(rows)]
 
-    def _fulltext_search(
-        self,
-        query: str,
-        filters: list[dict[str, Any]] | None,
-        account_id: int | None,
-        limit: int,
-    ) -> list[tuple[Email, float]]:
-        """PostgreSQL tsvector fulltext search with ts_rank_cd scoring."""
+    def _fulltext(self, query: str, filters: list[dict] | None, limit: int) -> list[tuple[Email, float]]:
         tsquery = func.plainto_tsquery("simple", query)
         rank = func.ts_rank_cd(Email.search_tsv, tsquery)
-
         stmt = select(Email, rank.label("rank"))
-        stmt = _apply_filters(stmt, filters, account_id)
+        stmt = _apply_filters(stmt, filters, None)
         stmt = stmt.where(Email.search_tsv.isnot(None))
         stmt = stmt.where(literal_column("search_tsv").op("@@")(tsquery))
-        stmt = stmt.order_by(rank.desc(), Email.sent_at.desc().nullslast())
-        stmt = stmt.limit(limit)
-
+        stmt = stmt.order_by(rank.desc(), Email.sent_at.desc().nullslast()).limit(limit)
         rows = self.db.execute(stmt).all()
         results = []
         for row in rows:
             email = row[0]
             ts_rank = float(row[1]) if row[1] is not None else 0.0
-            # Normalize ts_rank_cd to 0-1 range (it can exceed 1, cap it)
-            normalized = min(1.0, ts_rank)
-            results.append((email, max(0.1, normalized)))
+            results.append((email, max(0.1, min(1.0, ts_rank))))
         return results
 
-    def _vector_search(
-        self,
-        query: str,
-        filters: list[dict[str, Any]] | None,
-        account_id: int | None,
-        limit: int,
-    ) -> list[tuple[Email, float]]:
-        """pgvector cosine similarity search."""
+    def _vector(self, query: str, filters: list[dict] | None, limit: int) -> list[tuple[Email, float]]:
+        if not self.embedder:
+            return []
         query_embedding = self.embedder.encode_sync(query)
         if not query_embedding or not any(x != 0 for x in query_embedding):
             return []
-
         has_any = (
             Email.subject_embedding.isnot(None)
             | Email.body_embedding.isnot(None)
@@ -320,40 +179,50 @@ class HybridEmailSearchEngine:
         d_pooled = Email.body_pooled_embedding.cosine_distance(query_embedding)
         d_subj = Email.subject_embedding.cosine_distance(query_embedding)
         distance = func.coalesce(d_body, d_pooled, d_subj)
-
         stmt = select(Email, distance.label("distance"))
-        stmt = _apply_filters(stmt, filters, account_id)
+        stmt = _apply_filters(stmt, filters, None)
         stmt = stmt.where(has_any)
-        stmt = stmt.order_by(distance, Email.sent_at.desc().nullslast())
-        stmt = stmt.limit(limit)
-
+        stmt = stmt.order_by(distance, Email.sent_at.desc().nullslast()).limit(limit)
         rows = self.db.execute(stmt).all()
         results = []
         for row in rows:
             email = row[0]
             dist = float(row[1]) if row[1] is not None else 1.0
-            score = max(0.0, min(1.0, 1.0 - dist))
-            results.append((email, score))
+            results.append((email, max(0.0, min(1.0, 1.0 - dist))))
         return results
 
-    # --- Legacy-compatible search for existing email_get/thread tools ---
+    def _format_result(self, item: Email, scores: dict[str, float], methods: list[str]) -> dict[str, Any]:
+        # Label maps are handled by a helper in Email
+        label_maps = _load_label_maps(self.db, [item.account_id])
+        return _email_to_result_dict(item, label_maps, scores, methods)
 
-    def get_by_id(self, gmail_id: str, account_id: int | None = None) -> dict[str, Any] | None:
+    # Wrap the search method to maintain the exact same response structure if necessary,
+    # though lilith-core's format is very similar.
+    def search(self, query: str = "", methods: list[str] | None = None, filters: list[dict] | None = None, account_id: int | None = None, top_k: int = 10) -> dict:
+        # For Gmail, we might want to override to handle account_id explicitly in filters
+        if account_id is not None:
+            filters = (filters or []) + [{"field": "account_id", "value": account_id}]
+        
+        results, timing_ms, methods_executed = super().search(query, methods, filters, top_k)
+        
+        return {
+            "results": results,
+            "total_available": len(results), # Base class doesn't track total across all if limited
+            "methods_executed": methods_executed,
+            "timing_ms": timing_ms,
+            "error": None,
+        }
+
+    def _get_item_by_id(self, item_id: str, account_id: int | None = None, **kwargs) -> Email | None:
         stmt = (
             select(Email)
-            .where(Email.gmail_id == gmail_id)
+            .where(Email.gmail_id == item_id)
             .where(Email.deleted_at.is_(None))
         )
         stmt = _transformed_only(stmt)
         if account_id is not None:
             stmt = stmt.where(Email.account_id == account_id)
-        email = self.db.execute(stmt).scalars().one_or_none()
-        if not email:
-            return None
-        label_maps = _load_label_maps(self.db, [email.account_id])
-        return external_email_to_dict(
-            to_external_email(email, PRIVACY_MODE_EXTERNAL, label_id_to_name=label_maps.get(email.account_id))
-        )
+        return self.db.execute(stmt).scalars().one_or_none()
 
     def get_thread(self, thread_id: str, account_id: int | None = None) -> dict[str, Any] | None:
         stmt = (
@@ -371,9 +240,7 @@ class HybridEmailSearchEngine:
         account_ids = list({e.account_id for e in rows})
         label_maps = _load_label_maps(self.db, account_ids)
         messages = [
-            external_email_to_dict(
-                to_external_email(e, PRIVACY_MODE_EXTERNAL, label_id_to_name=label_maps.get(e.account_id))
-            )
+            _email_to_result_dict(e, label_maps, {}, ["thread_lookup"])
             for e in rows
         ]
         return {
