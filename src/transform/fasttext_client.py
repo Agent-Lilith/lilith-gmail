@@ -28,7 +28,10 @@ def detect_language(text: str) -> str:
     first = predictions[0] if isinstance(predictions[0], dict) else {}
     lang = (first.get("language") or "").strip()
     confidence = first.get("confidence")
-    if isinstance(confidence, (int, float)) and confidence < DETECT_CONFIDENCE_THRESHOLD:
+    if (
+        isinstance(confidence, (int, float))
+        and confidence < DETECT_CONFIDENCE_THRESHOLD
+    ):
         return "en"
     if lang and len(lang) >= 2:
         base = lang.split("_")[0].lower()[:2]

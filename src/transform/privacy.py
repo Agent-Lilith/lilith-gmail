@@ -5,14 +5,13 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from pydantic import BaseModel, Field, field_validator
 
+from core.config import settings
 from core.privacy import PrivacyTier
 
-from core.config import settings
 from . import vllm_client
 
 
@@ -22,7 +21,7 @@ class EmailData(BaseModel):
     sender: str = Field(default="", max_length=500)
     has_attachments: bool = False
     labels: list[str] = Field(default_factory=list, max_length=100)
-    debug_email_id: Optional[int] = None
+    debug_email_id: int | None = None
 
     @field_validator("subject", "body", mode="before")
     @classmethod
@@ -35,8 +34,10 @@ class EmailData(BaseModel):
         if not v or not isinstance(v, str):
             return (v or "").strip()
         s = v.strip()
+        # Allow only sender that looks like an email (contains @); otherwise treat as empty
+        # (real-world data often has "unknown", display names without address, etc.)
         if s and "@" not in s:
-            raise ValueError("sender must contain '@' when non-empty")
+            return ""
         return s.lower() if s else s
 
 
@@ -56,6 +57,7 @@ class ClassificationMetrics:
     public_count: int = 0
     errors: int = 0
     avg_latency_ms: float = 0.0
+
 
 VALID_TIERS = frozenset({"SENSITIVE", "PERSONAL", "PUBLIC"})
 TIER_ORDER: tuple[str, ...] = ("SENSITIVE", "PERSONAL", "PUBLIC")
@@ -130,7 +132,9 @@ def _parse_tier(raw_response: str) -> str:
         tier = _extract_tier_from_text(raw)
         if tier is not None:
             return tier
-        raise ValueError("Classification response was empty after stripping think blocks")
+        raise ValueError(
+            "Classification response was empty after stripping think blocks"
+        )
 
     if cleaned in VALID_TIERS:
         return cleaned
@@ -147,13 +151,19 @@ def _parse_tier(raw_response: str) -> str:
         if tier in cleaned:
             return tier
 
-    preview = (raw_response[:100] + "…") if len(raw_response or "") > 100 else (raw_response or "")
+    preview = (
+        (raw_response[:100] + "…")
+        if len(raw_response or "") > 100
+        else (raw_response or "")
+    )
     raise ValueError(
         "Could not parse tier from classification response (expected SENSITIVE, PERSONAL, or PUBLIC). "
         f"Preview: {preview!r}"
     )
 
+
 from core.capabilities_loader import get_classify_max_model_len, get_vllm_model_id
+
 from .prompt_loader import get_classification_prompts
 from .spacy_client import sanitize_with_spacy_api
 
@@ -187,8 +197,8 @@ class PrivacyManager:
                 self.metrics.total_calls += 1
                 n = self.metrics.total_calls
                 self.metrics.avg_latency_ms = (
-                    (self.metrics.avg_latency_ms * (n - 1) + elapsed_ms) / n
-                )
+                    self.metrics.avg_latency_ms * (n - 1) + elapsed_ms
+                ) / n
                 if self.metrics.total_calls % 100 == 0:
                     logger.info(
                         "Classification metrics: %s calls, %.1f ms avg, %s errors",
@@ -217,9 +227,13 @@ class PrivacyManager:
             else:
                 self.metrics.public_count += 1
         tier_name = (
-            "SENSITIVE" if tier == PrivacyTier.SENSITIVE else
-            "PERSONAL" if tier == PrivacyTier.PERSONAL else
-            "PUBLIC" if tier == PrivacyTier.PUBLIC else "?"
+            "SENSITIVE"
+            if tier == PrivacyTier.SENSITIVE
+            else "PERSONAL"
+            if tier == PrivacyTier.PERSONAL
+            else "PUBLIC"
+            if tier == PrivacyTier.PUBLIC
+            else "?"
         )
         return ClassificationResult(
             tier=tier,
@@ -235,7 +249,7 @@ class PrivacyManager:
         *,
         has_attachments: bool = False,
         labels: list[str] | None = None,
-        debug_email_id: Optional[int] = None,
+        debug_email_id: int | None = None,
     ) -> int:
         if not self.vllm_url:
             raise RuntimeError(
@@ -378,7 +392,7 @@ class PrivacyManager:
         *,
         has_attachments: bool = False,
         labels: list[str] | None = None,
-        debug_email_id: Optional[int] = None,
+        debug_email_id: int | None = None,
     ) -> int:
         v = self._template_vars(
             sender_str,
@@ -391,7 +405,9 @@ class PrivacyManager:
         user_content = self._classify_user_template.format(**v)
 
         if debug_email_id is not None:
-            _write_classification_prompts_debug(debug_email_id, system_content, user_content)
+            _write_classification_prompts_debug(
+                debug_email_id, system_content, user_content
+            )
 
         full_prompt_for_count = self._full_prompt_for_token_count(
             sender_str,

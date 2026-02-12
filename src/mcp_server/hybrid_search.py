@@ -5,11 +5,11 @@ The engine merges, deduplicates, and produces SearchResultV1-compatible output.
 """
 
 import logging
-import time
-from datetime import date, datetime, time as dtime
+from datetime import date, datetime
+from datetime import time as dtime
 from typing import Any
 
-from sqlalchemy import func, select, text, literal_column
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.orm import Session
 
 from core.embeddings import Embedder
@@ -40,9 +40,11 @@ def _transformed_only(stmt):
 def _load_label_maps(db: Session, account_ids: list[int]) -> dict[int, dict[str, str]]:
     if not account_ids:
         return {}
-    rows = db.execute(
-        select(AccountLabel).where(AccountLabel.account_id.in_(account_ids))
-    ).scalars().all()
+    rows = (
+        db.execute(select(AccountLabel).where(AccountLabel.account_id.in_(account_ids)))
+        .scalars()
+        .all()
+    )
     out: dict[int, dict[str, str]] = {aid: {} for aid in account_ids}
     for al in rows:
         out[al.account_id][al.label_id] = al.label_name
@@ -72,7 +74,9 @@ def _apply_filters(stmt, filters: list[dict[str, Any]] | None, account_id: int |
                 stmt = stmt.where(Email.from_email.ilike(f"%{value}%"))
         elif field == "to_email" and value:
             # Search in to_emails array
-            stmt = stmt.where(func.array_to_string(Email.to_emails, ',').ilike(f"%{value}%"))
+            stmt = stmt.where(
+                func.array_to_string(Email.to_emails, ",").ilike(f"%{value}%")
+            )
         elif field == "labels" and value:
             if isinstance(value, list):
                 stmt = stmt.where(Email.labels.overlap(value))
@@ -83,7 +87,9 @@ def _apply_filters(stmt, filters: list[dict[str, Any]] | None, account_id: int |
         elif field == "date_after" and value:
             stmt = stmt.where(Email.sent_at >= _parse_date_bound(str(value)))
         elif field == "date_before" and value:
-            stmt = stmt.where(Email.sent_at <= _parse_date_bound(str(value), end_of_day=True))
+            stmt = stmt.where(
+                Email.sent_at <= _parse_date_bound(str(value), end_of_day=True)
+            )
         elif field == "account_id" and value is not None:
             stmt = stmt.where(Email.account_id == int(value))
 
@@ -98,7 +104,9 @@ def _email_to_result_dict(
 ) -> dict[str, Any]:
     """Convert an Email ORM object to a SearchResultV1-compatible dict."""
     label_id_to_name = label_maps.get(email.account_id)
-    ext = to_external_email(email, PRIVACY_MODE_EXTERNAL, label_id_to_name=label_id_to_name)
+    ext = to_external_email(
+        email, PRIVACY_MODE_EXTERNAL, label_id_to_name=label_id_to_name
+    )
     ext_dict = external_email_to_dict(ext)
 
     from_str = (
@@ -132,6 +140,7 @@ def _email_to_result_dict(
 
 from common.search import BaseHybridSearchEngine
 
+
 class HybridEmailSearchEngine(BaseHybridSearchEngine[Email]):
     """Hybrid search engine for emails using lilith-core."""
 
@@ -141,14 +150,18 @@ class HybridEmailSearchEngine(BaseHybridSearchEngine[Email]):
     def _get_item_id(self, item: Email) -> str:
         return item.gmail_id
 
-    def _structured(self, filters: list[dict] | None, limit: int) -> list[tuple[Email, float]]:
+    def _structured(
+        self, filters: list[dict] | None, limit: int
+    ) -> list[tuple[Email, float]]:
         stmt = select(Email)
         stmt = _apply_filters(stmt, filters, None)
         stmt = stmt.order_by(Email.sent_at.desc().nullslast()).limit(limit)
         rows = self.db.execute(stmt).scalars().all()
         return [(row, max(0.3, 1.0 - i * 0.03)) for i, row in enumerate(rows)]
 
-    def _fulltext(self, query: str, filters: list[dict] | None, limit: int) -> list[tuple[Email, float]]:
+    def _fulltext(
+        self, query: str, filters: list[dict] | None, limit: int
+    ) -> list[tuple[Email, float]]:
         tsquery = func.plainto_tsquery("simple", query)
         rank = func.ts_rank_cd(Email.search_tsv, tsquery)
         stmt = select(Email, rank.label("rank"))
@@ -164,7 +177,9 @@ class HybridEmailSearchEngine(BaseHybridSearchEngine[Email]):
             results.append((email, max(0.1, min(1.0, ts_rank))))
         return results
 
-    def _vector(self, query: str, filters: list[dict] | None, limit: int) -> list[tuple[Email, float]]:
+    def _vector(
+        self, query: str, filters: list[dict] | None, limit: int
+    ) -> list[tuple[Email, float]]:
         if not self.embedder:
             return []
         query_embedding = self.embedder.encode_sync(query)
@@ -191,29 +206,44 @@ class HybridEmailSearchEngine(BaseHybridSearchEngine[Email]):
             results.append((email, max(0.0, min(1.0, 1.0 - dist))))
         return results
 
-    def _format_result(self, item: Email, scores: dict[str, float], methods: list[str]) -> dict[str, Any]:
+    def _format_result(
+        self, item: Email, scores: dict[str, float], methods: list[str]
+    ) -> dict[str, Any]:
         # Label maps are handled by a helper in Email
         label_maps = _load_label_maps(self.db, [item.account_id])
         return _email_to_result_dict(item, label_maps, scores, methods)
 
     # Wrap the search method to maintain the exact same response structure if necessary,
     # though lilith-core's format is very similar.
-    def search(self, query: str = "", methods: list[str] | None = None, filters: list[dict] | None = None, account_id: int | None = None, top_k: int = 10) -> dict:
+    def search(
+        self,
+        query: str = "",
+        methods: list[str] | None = None,
+        filters: list[dict] | None = None,
+        account_id: int | None = None,
+        top_k: int = 10,
+    ) -> dict:
         # For Gmail, we might want to override to handle account_id explicitly in filters
         if account_id is not None:
             filters = (filters or []) + [{"field": "account_id", "value": account_id}]
-        
-        results, timing_ms, methods_executed = super().search(query, methods, filters, top_k)
-        
+
+        results, timing_ms, methods_executed = super().search(
+            query, methods, filters, top_k
+        )
+
         return {
             "results": results,
-            "total_available": len(results), # Base class doesn't track total across all if limited
+            "total_available": len(
+                results
+            ),  # Base class doesn't track total across all if limited
             "methods_executed": methods_executed,
             "timing_ms": timing_ms,
             "error": None,
         }
 
-    def _get_item_by_id(self, item_id: str, account_id: int | None = None, **kwargs) -> Email | None:
+    def _get_item_by_id(
+        self, item_id: str, account_id: int | None = None, **kwargs
+    ) -> Email | None:
         stmt = (
             select(Email)
             .where(Email.gmail_id == item_id)
@@ -224,7 +254,9 @@ class HybridEmailSearchEngine(BaseHybridSearchEngine[Email]):
             stmt = stmt.where(Email.account_id == account_id)
         return self.db.execute(stmt).scalars().one_or_none()
 
-    def get_thread(self, thread_id: str, account_id: int | None = None) -> dict[str, Any] | None:
+    def get_thread(
+        self, thread_id: str, account_id: int | None = None
+    ) -> dict[str, Any] | None:
         stmt = (
             select(Email)
             .where(Email.gmail_thread_id == thread_id)
@@ -240,8 +272,7 @@ class HybridEmailSearchEngine(BaseHybridSearchEngine[Email]):
         account_ids = list({e.account_id for e in rows})
         label_maps = _load_label_maps(self.db, account_ids)
         messages = [
-            _email_to_result_dict(e, label_maps, {}, ["thread_lookup"])
-            for e in rows
+            _email_to_result_dict(e, label_maps, {}, ["thread_lookup"]) for e in rows
         ]
         return {
             "thread_id": thread_id,

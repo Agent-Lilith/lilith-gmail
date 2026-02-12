@@ -4,7 +4,6 @@ Return shape (ToolResult): { "success": true, "output": str } or { "success": fa
 Sync implementations; callers must run in thread pool to avoid blocking.
 """
 
-import json
 import logging
 from typing import Any
 
@@ -31,13 +30,48 @@ def get_search_capabilities_tool() -> dict[str, Any]:
         "source_class": "personal",
         "supported_methods": ["structured", "fulltext", "vector"],
         "supported_filters": [
-            {"name": "from_email", "type": "string", "operators": ["eq", "contains"], "description": "Sender email address"},
-            {"name": "to_email", "type": "string", "operators": ["eq", "contains"], "description": "Recipient email address"},
-            {"name": "labels", "type": "string[]", "operators": ["in"], "description": "Gmail label IDs or names"},
-            {"name": "has_attachments", "type": "boolean", "operators": ["eq"], "description": "Has attachments filter"},
-            {"name": "date_after", "type": "date", "operators": ["gte"], "description": "Emails sent on or after this date (ISO format)"},
-            {"name": "date_before", "type": "date", "operators": ["lte"], "description": "Emails sent on or before this date (ISO format)"},
-            {"name": "account_id", "type": "integer", "operators": ["eq"], "description": "Restrict to specific email account"},
+            {
+                "name": "from_email",
+                "type": "string",
+                "operators": ["eq", "contains"],
+                "description": "Sender email address",
+            },
+            {
+                "name": "to_email",
+                "type": "string",
+                "operators": ["eq", "contains"],
+                "description": "Recipient email address",
+            },
+            {
+                "name": "labels",
+                "type": "string[]",
+                "operators": ["in"],
+                "description": "Gmail label IDs or names",
+            },
+            {
+                "name": "has_attachments",
+                "type": "boolean",
+                "operators": ["eq"],
+                "description": "Has attachments filter",
+            },
+            {
+                "name": "date_after",
+                "type": "date",
+                "operators": ["gte"],
+                "description": "Emails sent on or after this date (ISO format)",
+            },
+            {
+                "name": "date_before",
+                "type": "date",
+                "operators": ["lte"],
+                "description": "Emails sent on or before this date (ISO format)",
+            },
+            {
+                "name": "account_id",
+                "type": "integer",
+                "operators": ["eq"],
+                "description": "Restrict to specific email account",
+            },
         ],
         "max_limit": 100,
         "default_limit": 10,
@@ -81,7 +115,9 @@ def get_email_tool(email_id: str, account_id: int | None = None) -> dict:
 def get_email_thread_tool(thread_id: str, account_id: int | None = None) -> dict:
     with db_session() as db:
         engine = HybridEmailSearchEngine(db, Embedder())
-        result = engine.get_thread(thread_id, account_id=_resolve_account_id(account_id))
+        result = engine.get_thread(
+            thread_id, account_id=_resolve_account_id(account_id)
+        )
     if result is None:
         raise ValueError("Thread not found")
     return result
@@ -106,6 +142,6 @@ def summarize_emails_tool(
                     emails.append(e)
         else:
             raise ValueError("No emails or thread specified.")
-    
+
     summary = summarize_emails(emails)
     return {"summary": summary}

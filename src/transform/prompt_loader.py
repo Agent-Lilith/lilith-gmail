@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_PROMPTS_DIR = _PROJECT_ROOT / "prompts"
 
-_cached: Optional[dict] = None
+_cached: dict | None = None
 
 
 def get_prompts_dir() -> Path:

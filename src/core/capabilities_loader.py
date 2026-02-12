@@ -1,13 +1,12 @@
 import json
 from pathlib import Path
-from typing import Optional
 
 _DEFAULT_EMBED_MAX_TOKENS = 8192
 _DEFAULT_EMBED_MAX_CHARS = 32768  # ~4 chars/token * 8192
 _DEFAULT_CLASSIFY_MAX_CHARS = 6000
 
-_capabilities_path: Optional[Path] = None
-_cached: Optional[dict] = None
+_capabilities_path: Path | None = None
+_cached: dict | None = None
 
 
 def _get_path() -> Path:
@@ -20,7 +19,7 @@ def get_capabilities_path() -> Path:
     return _get_path()
 
 
-def set_capabilities_path(path: Optional[Path]) -> None:
+def set_capabilities_path(path: Path | None) -> None:
     global _capabilities_path, _cached
     _capabilities_path = path
     _cached = None
@@ -141,4 +140,5 @@ def get_vllm_model_id() -> str:
     if model_id is not None and isinstance(model_id, str) and model_id.strip():
         return model_id.strip()
     from core.config import settings
+
     return settings.VLLM_MODEL

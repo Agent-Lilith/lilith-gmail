@@ -1,5 +1,4 @@
 import logging
-from typing import List, Union
 
 import httpx
 
@@ -9,11 +8,11 @@ logger = logging.getLogger(__name__)
 def _vllm_base_url(v1_url: str) -> str:
     u = (v1_url or "").rstrip("/")
     if u.endswith("/v1"):
-        return u[: -3].rstrip("/")
+        return u[:-3].rstrip("/")
     return u
 
 
-def tokenize_sync(base_url: str, text: str, timeout: float = 15.0) -> List[int]:
+def tokenize_sync(base_url: str, text: str, timeout: float = 15.0) -> list[int]:
     if not base_url:
         raise RuntimeError("vLLM base URL is not set (VLLM_URL).")
     if not text:
@@ -31,7 +30,9 @@ def tokenize_sync(base_url: str, text: str, timeout: float = 15.0) -> List[int]:
             return ids
         if isinstance(ids, list) and ids and isinstance(ids[0], list):
             return ids[0]
-    raise ValueError("vLLM /tokenize returned unexpected response shape: %s" % type(data))
+    raise ValueError(
+        "vLLM /tokenize returned unexpected response shape: %s" % type(data)
+    )
 
 
 def token_count_sync(base_url: str, text: str, timeout: float = 15.0) -> int:

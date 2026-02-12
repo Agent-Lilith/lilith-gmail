@@ -1,10 +1,9 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from core.models import Email
 from core.privacy import PrivacyTier
-
 
 BODY_SENSITIVE_PLACEHOLDER = "[SENSITIVE CONTENT REDACTED]"
 BODY_REDACTED_FALLBACK = "[REDACTED CONTENT]"
@@ -17,13 +16,13 @@ GMAIL_INBOX_URL_TEMPLATE = "https://mail.google.com/mail/u/0/#inbox/{message_id}
 class ExternalEmail(BaseModel):
     id: str = Field(description="Gmail message ID")
     thread_id: str = Field(description="Gmail thread ID")
-    subject: Optional[str] = None
+    subject: str | None = None
     from_: str = Field(alias="from", description="From header (name <email>)")
-    to: List[str] = Field(default_factory=list)
-    date: Optional[str] = Field(default=None, description="ISO format sent_at")
+    to: list[str] = Field(default_factory=list)
+    date: str | None = Field(default=None, description="ISO format sent_at")
     snippet: str = Field(default="", description="Redacted or placeholder snippet only")
     body: str = Field(default="", description="Redacted or placeholder body only")
-    labels: List[str] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)
     has_attachments: bool = False
     gmail_url: str = Field(
         default="",
@@ -37,13 +36,17 @@ def to_external_email(
     email: Email,
     privacy_mode: str = "external",
     *,
-    label_id_to_name: Optional[Dict[str, str]] = None,
+    label_id_to_name: dict[str, str] | None = None,
 ) -> ExternalEmail:
     if privacy_mode == "external" and email.privacy_tier == PrivacyTier.SENSITIVE:
         body = BODY_SENSITIVE_PLACEHOLDER
     else:
         body = email.body_redacted or BODY_REDACTED_FALLBACK
-    snippet = email.snippet_redacted if email.snippet_redacted is not None else SNIPPET_NOT_PROCESSED
+    snippet = (
+        email.snippet_redacted
+        if email.snippet_redacted is not None
+        else SNIPPET_NOT_PROCESSED
+    )
     label_ids = list(email.labels or [])
     if label_id_to_name:
         labels_display = [label_id_to_name.get(lid, lid) for lid in label_ids]
@@ -73,5 +76,5 @@ def to_external_email(
     )
 
 
-def external_email_to_dict(external: ExternalEmail) -> Dict[str, Any]:
+def external_email_to_dict(external: ExternalEmail) -> dict[str, Any]:
     return external.model_dump(by_alias=True)

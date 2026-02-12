@@ -12,20 +12,24 @@ logging.basicConfig(
 logging.getLogger("sync").setLevel(logging.INFO)
 logging.getLogger("transform").setLevel(logging.INFO)
 
-from core.database import db_session
-from core.models import EmailAccount, Email, EmailChunk
+from datetime import UTC
+
 from sqlalchemy import delete, func, select, update
-from sync.oauth_helpers import run_local_oauth, token_from_credentials
+
 from core.config import settings
-from sync.gmail_client import GmailClient
-from sync.sync_workers import SyncWorker
-from transform.privacy import PrivacyManager
+from core.database import db_session
 from core.embeddings import Embedder
+from core.models import Email, EmailAccount, EmailChunk
+from sync.gmail_client import GmailClient
+from sync.oauth_helpers import run_local_oauth, token_from_credentials
+from sync.sync_workers import SyncWorker
 from transform.pipeline import TransformPipeline
+from transform.privacy import PrivacyManager
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
+
     uvicorn.run(
         "daemon.app:app",
         host=args.host,
@@ -85,7 +89,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
                 concurrency=args.concurrency,
             )
         )
-        print(f"Sync completed for {account.email_address}. Run 'transform {args.account_id}' to classify and embed.")
+        print(
+            f"Sync completed for {account.email_address}. Run 'transform {args.account_id}' to classify and embed."
+        )
     return 0
 
 
@@ -114,13 +120,16 @@ def _transform_log_file_handler():
     handler = logging.FileHandler(path, encoding="utf-8")
     handler.setLevel(logging.INFO)
     handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
     )
     return handler, path
 
 
 def cmd_transform(args: argparse.Namespace) -> int:
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
 
     email_id = getattr(args, "email_id", None)
 
@@ -147,10 +156,19 @@ def cmd_transform(args: argparse.Namespace) -> int:
                 if args.account_id is not None:
                     sub = sub.where(Email.account_id == args.account_id)
                 sub = sub.order_by(Email.id).limit(args.limit)
-                count = db.execute(select(func.count()).select_from(sub.subquery())).scalar_one() or 0
+                count = (
+                    db.execute(
+                        select(func.count()).select_from(sub.subquery())
+                    ).scalar_one()
+                    or 0
+                )
             else:
                 count = db.execute(stmt).scalar_one() or 0
-        scope = f"account {args.account_id}" if args.account_id is not None else "all accounts"
+        scope = (
+            f"account {args.account_id}"
+            if args.account_id is not None
+            else "all accounts"
+        )
         limit_s = f" (limit {args.limit})" if args.limit is not None else ""
         if not _require_confirm(
             f"Recompute will overwrite derived data (privacy_tier, embeddings, chunks) for {count} emails in {scope}{limit_s}. This cannot be undone.",
@@ -184,16 +202,26 @@ def cmd_transform(args: argparse.Namespace) -> int:
             if not args.force:
                 sub = sub.where(Email.transform_completed_at.is_(None))
             sub = sub.order_by(Email.id).limit(args.limit)
-            total = db.execute(select(func.count()).select_from(sub.subquery())).scalar_one() or 0
+            total = (
+                db.execute(
+                    select(func.count()).select_from(sub.subquery())
+                ).scalar_one()
+                or 0
+            )
         else:
             total = db.execute(stmt).scalar_one() or 0
 
     if total == 0:
         if email_id is not None:
-            print(f"No email found with id={email_id} or it has no body_text.", file=sys.stderr)
+            print(
+                f"No email found with id={email_id} or it has no body_text.",
+                file=sys.stderr,
+            )
         else:
             print("No emails to transform.", file=sys.stderr)
-            print("Use --force to recompute already-transformed emails.", file=sys.stderr)
+            print(
+                "Use --force to recompute already-transformed emails.", file=sys.stderr
+            )
         return 0
 
     print(f"Emails to transform: {total:,}", file=sys.stderr)
@@ -245,16 +273,26 @@ def cmd_get_email(args: argparse.Namespace) -> int:
         if email_id.isdigit():
             email = db.get(Email, int(email_id))
         else:
-            row = db.execute(
-                select(Email).where(Email.gmail_id == email_id).where(Email.deleted_at.is_(None))
-            ).scalars().one_or_none()
+            row = (
+                db.execute(
+                    select(Email)
+                    .where(Email.gmail_id == email_id)
+                    .where(Email.deleted_at.is_(None))
+                )
+                .scalars()
+                .one_or_none()
+            )
             email = row
         if not email:
             print(f"No email found for id={args.email_id!r}", file=sys.stderr)
             return 1
         tier_names = {1: "SENSITIVE", 2: "PERSONAL", 3: "PUBLIC"}
         tier = tier_names.get(email.privacy_tier, str(email.privacy_tier))
-        body = (email.body_text if getattr(args, "raw", False) else (email.body_redacted or email.body_text)) or ""
+        body = (
+            email.body_text
+            if getattr(args, "raw", False)
+            else (email.body_redacted or email.body_text)
+        ) or ""
         if not args.full and len(body) > 2000:
             body = body[:2000] + "\n... [truncated, use --full for full body]"
         print(f"id:           {email.id}")
@@ -293,15 +331,136 @@ def cmd_check_account(args: argparse.Namespace) -> int:
             mark = "  <- need this for sync" if has_readonly else ""
             print(f"  {s}{mark}")
         if not any("readonly" in s or "mail.google.com" in s for s in scopes):
-            print("\nWARNING: No gmail.readonly scope. Run add-account again after adding scope in OAuth consent screen.")
+            print(
+                "\nWARNING: No gmail.readonly scope. Run add-account again after adding scope in OAuth consent screen."
+            )
     return 0
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Register Gmail push notifications (watch) for the account. Requires GOOGLE_CLOUD_PROJECT and PUBSUB_TOPIC."""
+    from datetime import datetime
+
+    from sync.oauth_helpers import credentials_from_token, ensure_valid_credentials
+
+    if not settings.GOOGLE_CLOUD_PROJECT or not settings.PUBSUB_TOPIC:
+        print(
+            "GOOGLE_CLOUD_PROJECT and PUBSUB_TOPIC must be set in .env (e.g. gmailpurge-453401, gmail-topic).",
+            file=sys.stderr,
+        )
+        return 1
+
+    topic_name = settings.PUBSUB_TOPIC
+    if not topic_name.startswith("projects/"):
+        topic_name = (
+            f"projects/{settings.GOOGLE_CLOUD_PROJECT}/topics/{settings.PUBSUB_TOPIC}"
+        )
+
+    with db_session() as db:
+        account = db.get(EmailAccount, args.account_id)
+        if not account:
+            print(f"Account {args.account_id} not found", file=sys.stderr)
+            return 1
+        email_address = account.email_address
+        creds = credentials_from_token(account.oauth_token_encrypted)
+        creds = ensure_valid_credentials(creds)
+        gmail = GmailClient(creds)
+        try:
+            result = gmail.setup_push_notifications(
+                topic_name, label_ids=args.labels if args.labels else None
+            )
+        except Exception as e:
+            print(f"Watch registration failed: {e}", file=sys.stderr)
+            return 1
+
+    expiration_ms = result.get("expiration")
+    if expiration_ms:
+        try:
+            exp_sec = int(expiration_ms) // 1000
+            exp_dt = datetime.fromtimestamp(exp_sec, tz=UTC)
+            print(f"Watch registered for {email_address}.")
+            print(
+                f"Expires: {exp_dt.isoformat()} (re-run 'watch {args.account_id}' before then)."
+            )
+        except (TypeError, ValueError):
+            print(f"Watch registered. Expiration (raw): {expiration_ms}")
+    else:
+        print("Watch registered (expiration not in response).")
+    if result.get("historyId"):
+        print(f"History ID: {result['historyId']}")
+    return 0
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    """Poll Pub/Sub subscription for Gmail notifications (no public URL needed). Use gcloud auth application-default login."""
+    import base64
+    import json
+    import time
+
+    from google.auth import default as google_default
+    from googleapiclient.discovery import build
+
+    from daemon.app import handle_gmail_notification
+
+    if not settings.GOOGLE_CLOUD_PROJECT or not settings.PUBSUB_SUBSCRIPTION:
+        print(
+            "GOOGLE_CLOUD_PROJECT and PUBSUB_SUBSCRIPTION must be set in .env (e.g. lilithsync, lilith-emails-pull).",
+            file=sys.stderr,
+        )
+        return 1
+
+    subscription = settings.PUBSUB_SUBSCRIPTION
+    if not subscription.startswith("projects/"):
+        subscription = f"projects/{settings.GOOGLE_CLOUD_PROJECT}/subscriptions/{settings.PUBSUB_SUBSCRIPTION}"
+
+    creds, _ = google_default(scopes=["https://www.googleapis.com/auth/pubsub"])
+    pubsub = build("pubsub", "v1", credentials=creds)
+    interval = args.interval
+
+    print(
+        f"Polling {subscription} every {interval}s (Ctrl+C to stop).", file=sys.stderr
+    )
+    while True:
+        try:
+            body = {"maxMessages": args.max_messages, "returnImmediately": True}
+            response = (
+                pubsub.projects()
+                .subscriptions()
+                .pull(subscription=subscription, body=body)
+                .execute()
+            )
+            ack_ids = []
+            for msg in response.get("receivedMessages", []):
+                ack_ids.append(msg["ackId"])
+                try:
+                    data = base64.b64decode(msg["message"]["data"]).decode("utf-8")
+                    payload = json.loads(data)
+                    email_address = payload.get("emailAddress")
+                    history_id = payload.get("historyId")
+                    if isinstance(history_id, str) and history_id.isdigit():
+                        history_id = int(history_id)
+                    if email_address:
+                        handle_gmail_notification(email_address, history_id)
+                except Exception as e:
+                    print(f"Failed to process message: {e}", file=sys.stderr)
+            if ack_ids:
+                pubsub.projects().subscriptions().acknowledge(
+                    subscription=subscription, body={"ackIds": ack_ids}
+                ).execute()
+        except KeyboardInterrupt:
+            print("Stopped.", file=sys.stderr)
+            return 0
+        except Exception as e:
+            print(f"Pull error: {e}", file=sys.stderr)
+        time.sleep(interval)
 
 
 def cmd_prepare_debug(args: argparse.Namespace) -> int:
     import asyncio
+
+    from core.embeddings import Embedder
     from transform.pipeline import TransformPipeline
     from transform.privacy import PrivacyManager
-    from core.embeddings import Embedder
 
     email_id = args.email_id.strip()
     with db_session() as db:
@@ -309,9 +468,16 @@ def cmd_prepare_debug(args: argparse.Namespace) -> int:
             email = db.get(Email, int(email_id))
         else:
             from sqlalchemy import select
-            email = db.execute(
-                select(Email).where(Email.gmail_id == email_id).where(Email.deleted_at.is_(None))
-            ).scalars().one_or_none()
+
+            email = (
+                db.execute(
+                    select(Email)
+                    .where(Email.gmail_id == email_id)
+                    .where(Email.deleted_at.is_(None))
+                )
+                .scalars()
+                .one_or_none()
+            )
         if not email:
             print(f"No email found for id={email_id!r}", file=sys.stderr)
             return 1
@@ -319,11 +485,17 @@ def cmd_prepare_debug(args: argparse.Namespace) -> int:
         try:
             payload = asyncio.run(pipeline._prepare_one(email))
             print(f"OK: email id={email.id} prepared successfully.")
-            print(f"  privacy_tier={payload.privacy_tier}, body_type={payload.body_type}, subject_text len={len(payload.subject_text)}, body_text len={len(payload.body_text or '') or 0}, chunks={len(payload.chunks)}")
+            print(
+                f"  privacy_tier={payload.privacy_tier}, body_type={payload.body_type}, subject_text len={len(payload.subject_text)}, body_text len={len(payload.body_text or '') or 0}, chunks={len(payload.chunks)}"
+            )
             return 0
         except Exception as e:
             import traceback
-            print(f"Prepare failed for email id={email.id}: {type(e).__name__}: {e}", file=sys.stderr)
+
+            print(
+                f"Prepare failed for email id={email.id}: {type(e).__name__}: {e}",
+                file=sys.stderr,
+            )
             traceback.print_exc()
             return 1
 
@@ -355,6 +527,7 @@ def cmd_debug_fetch(args: argparse.Namespace) -> int:
             print(f"   OK: subject={msg.get('snippet', '')[:50]}...")
         except Exception as e:
             import json
+
             print(f"   ERROR: {type(e).__name__}: {e}")
             if hasattr(e, "resp"):
                 print(f"   Response status: {getattr(e.resp, 'status', '?')}")
@@ -362,7 +535,11 @@ def cmd_debug_fetch(args: argparse.Namespace) -> int:
                 print(f"   Error details: {e.error_details}")
             if hasattr(e, "content") and e.content:
                 try:
-                    raw = e.content.decode() if isinstance(e.content, bytes) else e.content
+                    raw = (
+                        e.content.decode()
+                        if isinstance(e.content, bytes)
+                        else e.content
+                    )
                     err = json.loads(raw)
                     print("   Error body (JSON):")
                     print(json.dumps(err, indent=2))
@@ -373,9 +550,11 @@ def cmd_debug_fetch(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
+    from core.capabilities_loader import get_classify_max_chars, get_embed_max_chars
     from sync.oauth_helpers import credentials_from_token, ensure_valid_credentials
-    from core.capabilities_loader import get_embed_max_chars, get_classify_max_chars
+
     CLASSIFY_BODY_MAX_CHARS = get_classify_max_chars()
     EMBED_TEXT_MAX_CHARS = get_embed_max_chars()
 
@@ -396,31 +575,43 @@ def cmd_validate(args: argparse.Namespace) -> int:
             Email.account_id == args.account_id,
             Email.deleted_at.is_(None),
         )
-        db_count = db.execute(
-            select(func.count()).select_from(Email).where(*base_filter)
-        ).scalar_one() or 0
+        db_count = (
+            db.execute(
+                select(func.count()).select_from(Email).where(*base_filter)
+            ).scalar_one()
+            or 0
+        )
 
-        with_body = db.execute(
-            select(func.count())
-            .select_from(Email)
-            .where(*base_filter)
-            .where(Email.body_text.isnot(None))
-        ).scalar_one() or 0
+        with_body = (
+            db.execute(
+                select(func.count())
+                .select_from(Email)
+                .where(*base_filter)
+                .where(Email.body_text.isnot(None))
+            ).scalar_one()
+            or 0
+        )
 
         body_len = func.length(Email.body_text)
         with_body_filter = (*base_filter, Email.body_text.isnot(None))
-        within_classify = db.execute(
-            select(func.count())
-            .select_from(Email)
-            .where(*with_body_filter)
-            .where(body_len <= CLASSIFY_BODY_MAX_CHARS)
-        ).scalar_one() or 0
-        within_embed = db.execute(
-            select(func.count())
-            .select_from(Email)
-            .where(*with_body_filter)
-            .where(body_len <= EMBED_TEXT_MAX_CHARS)
-        ).scalar_one() or 0
+        within_classify = (
+            db.execute(
+                select(func.count())
+                .select_from(Email)
+                .where(*with_body_filter)
+                .where(body_len <= CLASSIFY_BODY_MAX_CHARS)
+            ).scalar_one()
+            or 0
+        )
+        within_embed = (
+            db.execute(
+                select(func.count())
+                .select_from(Email)
+                .where(*with_body_filter)
+                .where(body_len <= EMBED_TEXT_MAX_CHARS)
+            ).scalar_one()
+            or 0
+        )
 
         max_body_chars = None
         if with_body:
@@ -435,14 +626,22 @@ def cmd_validate(args: argparse.Namespace) -> int:
             print("  Count:      OK — counts match.")
         else:
             diff = db_count - api_messages
-            print(f"  Count:      MISMATCH — DB differs by {diff:+d} (run sync to align).")
+            print(
+                f"  Count:      MISMATCH — DB differs by {diff:+d} (run sync to align)."
+            )
         print(f"  Context:    {with_body} emails have body_text (transform eligible)")
-        print(f"             {within_classify} fit classification context (≤{CLASSIFY_BODY_MAX_CHARS} chars)")
-        print(f"             {within_embed} fit embedding context (≤{EMBED_TEXT_MAX_CHARS} chars)")
+        print(
+            f"             {within_classify} fit classification context (≤{CLASSIFY_BODY_MAX_CHARS} chars)"
+        )
+        print(
+            f"             {within_embed} fit embedding context (≤{EMBED_TEXT_MAX_CHARS} chars)"
+        )
         if with_body and (within_classify < with_body or within_embed < with_body):
             over_classify = with_body - within_classify
             over_embed = with_body - within_embed
-            print(f"             → {over_classify} truncated for classification, {over_embed} truncated for embedding")
+            print(
+                f"             → {over_classify} truncated for classification, {over_embed} truncated for embedding"
+            )
         elif with_body:
             print("             → All fit in context.")
         if with_body and max_body_chars is not None:
@@ -453,37 +652,58 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_capabilities(args: argparse.Namespace) -> int:
     from pathlib import Path
+
     from core.capabilities import run_all, write_capabilities_json
 
     data = run_all()
     print("Capabilities (discovered from deployed services):")
     emb = data.get("embedding") or {}
-    print(f"  Embedding:  max_tokens={emb.get('max_tokens')}, max_chars={emb.get('max_chars')} (source: {emb.get('source')})")
+    print(
+        f"  Embedding:  max_tokens={emb.get('max_tokens')}, max_chars={emb.get('max_chars')} (source: {emb.get('source')})"
+    )
     vllm = data.get("vllm") or {}
-    print(f"  vLLM:      max_model_len={vllm.get('max_model_len')} (source: {vllm.get('source')})")
+    print(
+        f"  vLLM:      max_model_len={vllm.get('max_model_len')} (source: {vllm.get('source')})"
+    )
     api = data.get("spacy_api") or {}
     print(f"  Spacy API: url={api.get('url')}, available={api.get('available')}")
     ft = data.get("fasttext_langdetect") or {}
     print(f"  FastText:  url={ft.get('url')}, available={ft.get('available')}")
     if data.get("classify_body_max_chars") is not None:
-        print(f"  Suggested:  classify_body_max_chars={data['classify_body_max_chars']}")
+        print(
+            f"  Suggested:  classify_body_max_chars={data['classify_body_max_chars']}"
+        )
 
     if args.output:
         path = Path(args.output).resolve()
         write_capabilities_json(path, data)
-        print(f"  Wrote {path} — transform/validate will use these limits when run from this project.")
+        print(
+            f"  Wrote {path} — transform/validate will use these limits when run from this project."
+        )
     return 0
 
 
 def cmd_reset_transform(args: argparse.Namespace) -> int:
     with db_session() as db:
-        count_stmt = select(func.count()).select_from(Email).where(Email.deleted_at.is_(None)).where(Email.body_text.isnot(None))
+        count_stmt = (
+            select(func.count())
+            .select_from(Email)
+            .where(Email.deleted_at.is_(None))
+            .where(Email.body_text.isnot(None))
+        )
         if args.account_id is not None:
             count_stmt = count_stmt.where(Email.account_id == args.account_id)
         n_emails = db.execute(count_stmt).scalar_one() or 0
         if n_emails == 0:
-            scope = f"account {args.account_id}" if args.account_id is not None else "all accounts"
-            print(f"No emails to reset in {scope} (need body_text, non-deleted).", file=sys.stderr)
+            scope = (
+                f"account {args.account_id}"
+                if args.account_id is not None
+                else "all accounts"
+            )
+            print(
+                f"No emails to reset in {scope} (need body_text, non-deleted).",
+                file=sys.stderr,
+            )
             return 0
         if not _require_confirm(
             f"Reset transform state for {n_emails:,} emails (clear derived fields + chunks). Then run 'transform' to recompute. This cannot be undone.",
@@ -496,7 +716,9 @@ def cmd_reset_transform(args: argparse.Namespace) -> int:
         subq = select(Email.id).where(*scope_conditions)
         db.execute(delete(EmailChunk).where(EmailChunk.email_id.in_(subq)))
         cleared = db.execute(
-            update(Email).where(*scope_conditions).values(
+            update(Email)
+            .where(*scope_conditions)
+            .values(
                 privacy_tier=None,
                 body_redacted=None,
                 snippet_redacted=None,
@@ -507,94 +729,238 @@ def cmd_reset_transform(args: argparse.Namespace) -> int:
             )
         )
         db.commit()
-        transform_cmd = f"transform {args.account_id}" if args.account_id is not None else "transform"
-        print(f"Reset {cleared.rowcount:,} emails (cleared derived fields; deleted chunks). Run '{transform_cmd}' to recompute.")
+        transform_cmd = (
+            f"transform {args.account_id}"
+            if args.account_id is not None
+            else "transform"
+        )
+        print(
+            f"Reset {cleared.rowcount:,} emails (cleared derived fields; deleted chunks). Run '{transform_cmd}' to recompute."
+        )
     return 0
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
     import alembic.config
+
     alembic.config.main(argv=["upgrade", "head"])
     return 0
 
 
 def cmd_mcp(args: argparse.Namespace) -> int:
     from mcp_server.server import main as mcp_main
+
     return mcp_main(transport=args.transport, port=args.port)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="lilith-gmail",
-        description="Lilith Email System. Commands: serve (daemon) | add-account, check-account | sync, transform | reset-transform | get-email | validate, capabilities, migrate | prepare-debug, debug-fetch | mcp.",
+        description="Lilith Email System. Commands: serve (daemon) | add-account, check-account, watch, pull | sync, transform | reset-transform | get-email | validate, capabilities, migrate | prepare-debug, debug-fetch | mcp.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     serve_p = sub.add_parser("serve", help="Run webhook daemon (Pub/Sub)")
-    serve_p.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    serve_p.add_argument(
+        "--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)"
+    )
     serve_p.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
     serve_p.add_argument("--reload", action="store_true", help="Reload on code change")
     serve_p.set_defaults(func=cmd_serve)
 
     add_p = sub.add_parser("add-account", help="Add or update Gmail account (OAuth)")
     add_p.add_argument("secrets", help="Path to client_secrets.json")
-    add_p.add_argument("--token-output", "-o", metavar="PATH", help="Save encrypted token to PATH")
+    add_p.add_argument(
+        "--token-output", "-o", metavar="PATH", help="Save encrypted token to PATH"
+    )
     add_p.set_defaults(func=cmd_add_account)
 
-    sync_p = sub.add_parser("sync", help="Download emails from Gmail (raw only); then run transform")
+    sync_p = sub.add_parser(
+        "sync", help="Download emails from Gmail (raw only); then run transform"
+    )
     sync_p.add_argument("account_id", type=int, help="Account ID")
-    sync_p.add_argument("-n", "--limit", type=int, default=None, metavar="N", help="Optional cap on messages (default: no limit)")
-    sync_p.add_argument("-j", "--concurrency", type=int, default=10, metavar="N", help="Concurrent API calls (default: 10)")
+    sync_p.add_argument(
+        "-n",
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Optional cap on messages (default: no limit)",
+    )
+    sync_p.add_argument(
+        "-j",
+        "--concurrency",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Concurrent API calls (default: 10)",
+    )
     sync_p.set_defaults(func=cmd_sync)
 
-    transform_p = sub.add_parser("transform", help="Classify, sanitize, embed stored emails (no download)")
-    transform_p.add_argument("account_id", type=int, nargs="?", default=None, help="Account ID (default: all)")
-    transform_p.add_argument("--force", action="store_true", help="Recompute already-transformed emails (asks confirmation unless -y)")
-    transform_p.add_argument("-y", "--yes", action="store_true", dest="yes", help="Skip confirmation for --force")
-    transform_p.add_argument("--batch-size", type=int, default=50, metavar="N", help="Emails per batch (default: 50); use 1 for one-at-a-time (safest for small TEI)")
-    transform_p.add_argument("-n", "--limit", type=int, default=None, metavar="N", help="Max emails to transform")
-    transform_p.add_argument("--email-id", type=int, default=None, metavar="ID", help="Transform only this email (database id)")
-    transform_p.add_argument("--no-tui", action="store_true", help="No TUI (for pipes/CI)")
+    transform_p = sub.add_parser(
+        "transform", help="Classify, sanitize, embed stored emails (no download)"
+    )
+    transform_p.add_argument(
+        "account_id",
+        type=int,
+        nargs="?",
+        default=None,
+        help="Account ID (default: all)",
+    )
+    transform_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Recompute already-transformed emails (asks confirmation unless -y)",
+    )
+    transform_p.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        dest="yes",
+        help="Skip confirmation for --force",
+    )
+    transform_p.add_argument(
+        "--batch-size",
+        type=int,
+        default=50,
+        metavar="N",
+        help="Emails per batch (default: 50); use 1 for one-at-a-time (safest for small TEI)",
+    )
+    transform_p.add_argument(
+        "-n",
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max emails to transform",
+    )
+    transform_p.add_argument(
+        "--email-id",
+        type=int,
+        default=None,
+        metavar="ID",
+        help="Transform only this email (database id)",
+    )
+    transform_p.add_argument(
+        "--no-tui", action="store_true", help="No TUI (for pipes/CI)"
+    )
     transform_p.set_defaults(func=cmd_transform)
 
-    reset_transform_p = sub.add_parser("reset-transform", help="Clear all transform-derived data; then run transform to recompute from clean state")
-    reset_transform_p.add_argument("account_id", type=int, nargs="?", default=None, help="Account ID (default: all)")
-    reset_transform_p.add_argument("-y", "--yes", action="store_true", dest="yes", help="Skip confirmation")
+    reset_transform_p = sub.add_parser(
+        "reset-transform",
+        help="Clear all transform-derived data; then run transform to recompute from clean state",
+    )
+    reset_transform_p.add_argument(
+        "account_id",
+        type=int,
+        nargs="?",
+        default=None,
+        help="Account ID (default: all)",
+    )
+    reset_transform_p.add_argument(
+        "-y", "--yes", action="store_true", dest="yes", help="Skip confirmation"
+    )
     reset_transform_p.set_defaults(func=cmd_reset_transform)
 
-    get_email_p = sub.add_parser("get-email", help="Print one email by id or Gmail message id")
+    get_email_p = sub.add_parser(
+        "get-email", help="Print one email by id or Gmail message id"
+    )
     get_email_p.add_argument("email_id", help="Database id (int) or Gmail message id")
-    get_email_p.add_argument("--full", action="store_true", help="Full body (default: truncate 2000)")
-    get_email_p.add_argument("--raw", action="store_true", help="Original body_text (default: sanitized for PERSONAL)")
-    get_email_p.epilog = "Body is plain text only; links from the HTML version in Gmail are not shown."
+    get_email_p.add_argument(
+        "--full", action="store_true", help="Full body (default: truncate 2000)"
+    )
+    get_email_p.add_argument(
+        "--raw",
+        action="store_true",
+        help="Original body_text (default: sanitized for PERSONAL)",
+    )
+    get_email_p.epilog = (
+        "Body is plain text only; links from the HTML version in Gmail are not shown."
+    )
     get_email_p.set_defaults(func=cmd_get_email)
 
     check_p = sub.add_parser("check-account", help="Print token scopes (debug 403)")
     check_p.add_argument("account_id", type=int, help="Account ID")
     check_p.set_defaults(func=cmd_check_account)
 
-    prepare_debug_p = sub.add_parser("prepare-debug", help="Run prepare for one email; full traceback on failure")
+    watch_p = sub.add_parser(
+        "watch",
+        help="Register Gmail push notifications (Pub/Sub watch) for this account",
+    )
+    watch_p.add_argument("account_id", type=int, help="Account ID")
+    watch_p.add_argument(
+        "--labels",
+        nargs="*",
+        default=None,
+        metavar="LABEL_ID",
+        help="Gmail label IDs to watch (default: INBOX only)",
+    )
+    watch_p.set_defaults(func=cmd_watch)
+
+    pull_p = sub.add_parser(
+        "pull",
+        help="Poll Pub/Sub for Gmail notifications (no public URL). Requires GOOGLE_CLOUD_PROJECT, PUBSUB_SUBSCRIPTION; use gcloud auth application-default login.",
+    )
+    pull_p.add_argument(
+        "--interval",
+        type=float,
+        default=10.0,
+        metavar="SECS",
+        help="Seconds between pulls (default: 10)",
+    )
+    pull_p.add_argument(
+        "--max-messages",
+        type=int,
+        default=5,
+        metavar="N",
+        help="Max messages per pull (default: 5)",
+    )
+    pull_p.set_defaults(func=cmd_pull)
+
+    prepare_debug_p = sub.add_parser(
+        "prepare-debug", help="Run prepare for one email; full traceback on failure"
+    )
     prepare_debug_p.add_argument("email_id", help="Database id or Gmail message id")
     prepare_debug_p.set_defaults(func=cmd_prepare_debug)
 
-    debug_p = sub.add_parser("debug-fetch", help="Fetch one email from Gmail; print error on failure (debug 403)")
-    debug_p.add_argument("account_id", type=int, nargs="?", default=1, help="Account ID (default: 1)")
+    debug_p = sub.add_parser(
+        "debug-fetch",
+        help="Fetch one email from Gmail; print error on failure (debug 403)",
+    )
+    debug_p.add_argument(
+        "account_id", type=int, nargs="?", default=1, help="Account ID (default: 1)"
+    )
     debug_p.set_defaults(func=cmd_debug_fetch)
 
     validate_p = sub.add_parser("validate", help="Compare DB count vs Gmail API")
     validate_p.add_argument("account_id", type=int, help="Account ID")
     validate_p.set_defaults(func=cmd_validate)
 
-    cap_p = sub.add_parser("capabilities", help="Discover embedding/vLLM/Spacy limits; write capabilities.json with -o")
-    cap_p.add_argument("-o", "--output", metavar="PATH", help="Write capabilities.json to PATH")
+    cap_p = sub.add_parser(
+        "capabilities",
+        help="Discover embedding/vLLM/Spacy limits; write capabilities.json with -o",
+    )
+    cap_p.add_argument(
+        "-o", "--output", metavar="PATH", help="Write capabilities.json to PATH"
+    )
     cap_p.set_defaults(func=cmd_capabilities)
 
     mig_p = sub.add_parser("migrate", help="Run DB migrations (alembic upgrade head)")
     mig_p.set_defaults(func=cmd_migrate)
 
     mcp_p = sub.add_parser("mcp", help="Run MCP server (or: uv run mcp)")
-    mcp_p.add_argument("--transport", choices=["stdio", "streamable-http"], default="stdio", help="Transport (default: stdio)")
-    mcp_p.add_argument("--port", type=int, default=8001, help="Port for streamable-http (default: 8001)")
+    mcp_p.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="Transport (default: stdio)",
+    )
+    mcp_p.add_argument(
+        "--port",
+        type=int,
+        default=8001,
+        help="Port for streamable-http (default: 8001)",
+    )
     mcp_p.set_defaults(func=cmd_mcp)
 
     args = parser.parse_args()

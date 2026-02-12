@@ -1,6 +1,5 @@
 import logging
 import re
-from typing import List, Optional
 
 import httpx
 
@@ -14,30 +13,84 @@ REDACT_LABELS = {"PERSON", "GPE", "LOC", "FAC", "ORG"}
 PERSON_FALSE_POSITIVE_SPANS = frozenset(
     s.upper()
     for s in (
-        "can't", "don't", "won't", "isn't", "aren't", "wasn't", "weren't",
-        "hasn't", "hadn't", "couldn't", "shouldn't", "wouldn't", "doesn't",
-        "didn't", "cannot", "cant", "dont", "wont", "isnt",
+        "can't",
+        "don't",
+        "won't",
+        "isn't",
+        "aren't",
+        "wasn't",
+        "weren't",
+        "hasn't",
+        "hadn't",
+        "couldn't",
+        "shouldn't",
+        "wouldn't",
+        "doesn't",
+        "didn't",
+        "cannot",
+        "cant",
+        "dont",
+        "wont",
+        "isnt",
     )
 )
 MIN_PERSON_SPAN_LEN = 4  # skip PERSON entities shorter than this (e.g. "AI", "Jo")
 
 # Keys, tokens, SSH blocks, API secrets; order matters (more specific first)
-SENSITIVE_PATTERNS: List[tuple[re.Pattern, str]] = [
-    (re.compile(r"-----BEGIN (?:OPENSSH |RSA |DSA |EC |)PRIVATE KEY-----[\s\S]*?-----END (?:OPENSSH |RSA |DSA |EC |)PRIVATE KEY-----", re.IGNORECASE), "[REDACTED]"),
+SENSITIVE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (
+        re.compile(
+            r"-----BEGIN (?:OPENSSH |RSA |DSA |EC |)PRIVATE KEY-----[\s\S]*?-----END (?:OPENSSH |RSA |DSA |EC |)PRIVATE KEY-----",
+            re.IGNORECASE,
+        ),
+        "[REDACTED]",
+    ),
     (re.compile(r"Bearer\s+[A-Za-z0-9\-_.~+/]+=*", re.IGNORECASE), "[REDACTED]"),
-    (re.compile(r"access_token[\s=:]+[\w\-.]+\.[\w\-.]+\.[\w\-]+", re.IGNORECASE), "access_token=[REDACTED]"),
-    (re.compile(r"(?:api[_-]?key|apikey|api_secret|secret_key|auth[_-]?token)[\s=:]+[\w\-~./+=]+", re.IGNORECASE), "[REDACTED]"),
-    (re.compile(r"(?:password|passwd|pwd|token)[\s]*[=:][\s]*[\S]+", re.IGNORECASE), "[REDACTED]"),
-    (re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}(?:-[A-Z0-9]{4})*\b", re.IGNORECASE), "[REDACTED]"),
-    (re.compile(r"\b[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}(?:-[A-Z0-9]{5})*\b", re.IGNORECASE), "[REDACTED]"),
+    (
+        re.compile(r"access_token[\s=:]+[\w\-.]+\.[\w\-.]+\.[\w\-]+", re.IGNORECASE),
+        "access_token=[REDACTED]",
+    ),
+    (
+        re.compile(
+            r"(?:api[_-]?key|apikey|api_secret|secret_key|auth[_-]?token)[\s=:]+[\w\-~./+=]+",
+            re.IGNORECASE,
+        ),
+        "[REDACTED]",
+    ),
+    (
+        re.compile(r"(?:password|passwd|pwd|token)[\s]*[=:][\s]*[\S]+", re.IGNORECASE),
+        "[REDACTED]",
+    ),
+    (
+        re.compile(
+            r"\b[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}(?:-[A-Z0-9]{4})*\b",
+            re.IGNORECASE,
+        ),
+        "[REDACTED]",
+    ),
+    (
+        re.compile(
+            r"\b[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}(?:-[A-Z0-9]{5})*\b",
+            re.IGNORECASE,
+        ),
+        "[REDACTED]",
+    ),
     (re.compile(r"\b[A-Fa-f0-9]{32,}\b"), "[REDACTED]"),
     (re.compile(r"\b[A-Za-z0-9+/]{20,}={0,2}\b"), "[REDACTED]"),
-    (re.compile(r"(?:license\s+key|product\s+key|serial\s+number|activation\s+key)[\s:]+[\w\-]+", re.IGNORECASE), "[REDACTED]"),
+    (
+        re.compile(
+            r"(?:license\s+key|product\s+key|serial\s+number|activation\s+key)[\s:]+[\w\-]+",
+            re.IGNORECASE,
+        ),
+        "[REDACTED]",
+    ),
 ]
 
 
 def _normalize_entity(e: dict) -> dict | None:
-    start = e.get("start") if "start" in e else e.get("start_char") or e.get("first_index")
+    start = (
+        e.get("start") if "start" in e else e.get("start_char") or e.get("first_index")
+    )
     end = e.get("end") if "end" in e else e.get("end_char") or e.get("last_index")
     label = e.get("label") or e.get("entity") or e.get("name") or e.get("type")
     if start is None or end is None or label is None:
@@ -48,7 +101,7 @@ def _normalize_entity(e: dict) -> dict | None:
 SPACY_NER_ENDPOINT = "/ner"
 
 
-def get_entities(text: str, lang: str = "en") -> List[dict]:
+def get_entities(text: str, lang: str = "en") -> list[dict]:
     url = (settings.SPACY_API_URL or "").rstrip("/")
     if not url:
         return []
@@ -61,12 +114,7 @@ def get_entities(text: str, lang: str = "en") -> List[dict]:
     if isinstance(data, list):
         raw = [e for e in data if isinstance(e, dict)]
     elif isinstance(data, dict):
-        raw = (
-            data.get("entities")
-            or data.get("extractions")
-            or data.get("ents")
-            or []
-        )
+        raw = data.get("entities") or data.get("extractions") or data.get("ents") or []
     out = []
     for e in raw:
         n = _normalize_entity(e)
@@ -78,6 +126,7 @@ def get_entities(text: str, lang: str = "en") -> List[dict]:
 # Replace URLs with [LINK] before token redaction so verification/reset links
 # don't get wiped by long-token patterns and leave the body unreadable
 _URL_PATTERN = re.compile(r"https?://\S+")
+
 
 def redact_sensitive_patterns(text: str) -> str:
     if not text:

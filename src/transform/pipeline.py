@@ -1,26 +1,27 @@
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable, Optional
+from datetime import UTC, datetime
 
-from sqlalchemy.orm import Session
 from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
-from core.models import AccountLabel, Email, EmailChunk, EMBEDDING_DIM
-from core.privacy import PrivacyTier
-from core.embeddings import Embedder
-from .privacy import EmailData, PrivacyManager
-from .spacy_client import full_redact_for_display
-from core.preprocessing import preprocess_body_for_embedding
-from .fasttext_client import detect_language
-from .chunking import Chunk, chunk_body, weighted_mean_embedding
 from core.capabilities_loader import (
     get_capabilities_path,
     get_embed_max_chars,
     get_embed_max_tokens,
     require_capabilities_for_transform,
 )
+from core.embeddings import Embedder
+from core.models import EMBEDDING_DIM, AccountLabel, Email, EmailChunk
+from core.preprocessing import preprocess_body_for_embedding
+from core.privacy import PrivacyTier
+
+from .chunking import Chunk, chunk_body, weighted_mean_embedding
+from .fasttext_client import detect_language
+from .privacy import EmailData, PrivacyManager
+from .spacy_client import full_redact_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ def _format_exception(exc: BaseException) -> str:
             pass
     return out or repr(exc)
 
+
 EMBED_BATCH_SIZE = 1
 PREPARE_CONCURRENCY = 4
 SNIPPET_REDACTED_PLACEHOLDER = "Content redacted"
@@ -45,14 +47,22 @@ SNIPPET_REDACTED_PLACEHOLDER = "Content redacted"
 class _PreparePayload:
     email: Email
     privacy_tier: int
-    body_redacted: Optional[str]
-    snippet_redacted: Optional[str]  # Safe for display; placeholder for SENSITIVE/PERSONAL, redacted snippet for PUBLIC
-    text_to_embed: Optional[str]
+    body_redacted: str | None
+    snippet_redacted: (
+        str | None
+    )  # Safe for display; placeholder for SENSITIVE/PERSONAL, redacted snippet for PUBLIC
+    text_to_embed: str | None
     subject: str
     body_type: str  # "full" | "chunked" | "none"
-    chunks: list = field(default_factory=list)  # list of Chunk when body_type == "chunked"
-    subject_text: str = ""  # text to embed for subject (empty if SENSITIVE or no subject)
-    body_text: Optional[str] = None  # text to embed for full body (None if chunked or none)
+    chunks: list = field(
+        default_factory=list
+    )  # list of Chunk when body_type == "chunked"
+    subject_text: str = (
+        ""  # text to embed for subject (empty if SENSITIVE or no subject)
+    )
+    body_text: str | None = (
+        None  # text to embed for full body (None if chunked or none)
+    )
 
 
 def _validate_embedding(vec: list | None, name: str, expect_content: bool) -> None:
@@ -61,7 +71,9 @@ def _validate_embedding(vec: list | None, name: str, expect_content: bool) -> No
             raise ValueError("%s is missing but content was expected" % name)
         return
     if len(vec) != EMBEDDING_DIM:
-        raise ValueError("%s has wrong dim %s (expected %s)" % (name, len(vec), EMBEDDING_DIM))
+        raise ValueError(
+            "%s has wrong dim %s (expected %s)" % (name, len(vec), EMBEDDING_DIM)
+        )
     if expect_content and all(x == 0.0 for x in vec):
         raise ValueError("%s is all zeros; embedding likely failed" % name)
 
@@ -76,7 +88,11 @@ def _validate_transform_result(
     text_to_embed: str | None,
     subject: str,
 ) -> None:
-    if privacy_tier not in (PrivacyTier.SENSITIVE, PrivacyTier.PERSONAL, PrivacyTier.PUBLIC):
+    if privacy_tier not in (
+        PrivacyTier.SENSITIVE,
+        PrivacyTier.PERSONAL,
+        PrivacyTier.PUBLIC,
+    ):
         raise ValueError("Invalid privacy_tier %s" % privacy_tier)
     expect_subject = bool(subject.strip()) and privacy_tier != PrivacyTier.SENSITIVE
     _validate_embedding(subject_emb, "subject_embedding", expect_subject)
@@ -86,7 +102,9 @@ def _validate_transform_result(
     if body_pooled_emb:
         _validate_embedding(body_pooled_emb, "body_pooled_embedding", expect_body)
     if expect_body and not body_emb and not body_pooled_emb:
-        raise ValueError("Body content to embed but no body_embedding or body_pooled_embedding")
+        raise ValueError(
+            "Body content to embed but no body_embedding or body_pooled_embedding"
+        )
     for i, (_, _, _, vec) in enumerate(chunk_rows):
         _validate_embedding(vec, f"chunk[{i}].embedding", True)
 
@@ -95,8 +113,8 @@ class TransformPipeline:
     def __init__(
         self,
         db: Session,
-        privacy_manager: Optional[PrivacyManager] = None,
-        embedder: Optional[Embedder] = None,
+        privacy_manager: PrivacyManager | None = None,
+        embedder: Embedder | None = None,
     ):
         self.db = db
         self.privacy = privacy_manager or PrivacyManager()
@@ -104,12 +122,12 @@ class TransformPipeline:
 
     def run(
         self,
-        account_id: Optional[int] = None,
-        email_id: Optional[int] = None,
+        account_id: int | None = None,
+        email_id: int | None = None,
         force: bool = False,
         batch_size: int = 50,
-        limit: Optional[int] = None,
-        progress_callback: Optional[Callable[[dict], None]] = None,
+        limit: int | None = None,
+        progress_callback: Callable[[dict], None] | None = None,
     ) -> int:
         caps = require_capabilities_for_transform()
         path = get_capabilities_path()
@@ -192,8 +210,8 @@ class TransformPipeline:
         email_ids: list[int],
         batch_size: int,
         total: int,
-        progress_callback: Optional[Callable[[dict], None]] = None,
-        debug_prompts_for_email_id: Optional[int] = None,
+        progress_callback: Callable[[dict], None] | None = None,
+        debug_prompts_for_email_id: int | None = None,
     ) -> dict:
         transformed = 0
         failed = 0
@@ -202,16 +220,18 @@ class TransformPipeline:
         body_chunked = 0
         total_batches = (total + batch_size - 1) // batch_size
         if progress_callback is not None:
-            progress_callback({
-                "total": total,
-                "processed": 0,
-                "failed": 0,
-                "by_tier": {},
-                "body_full": 0,
-                "body_chunked": 0,
-                "batch_num": 0,
-                "total_batches": total_batches,
-            })
+            progress_callback(
+                {
+                    "total": total,
+                    "processed": 0,
+                    "failed": 0,
+                    "by_tier": {},
+                    "body_full": 0,
+                    "body_chunked": 0,
+                    "batch_num": 0,
+                    "total_batches": total_batches,
+                }
+            )
         for i in range(0, len(email_ids), batch_size):
             batch_ids = email_ids[i : i + batch_size]
             batch_num = i // batch_size + 1
@@ -235,16 +255,18 @@ class TransformPipeline:
             body_chunked += batch_result.get("body_chunked", 0)
             self.db.commit()
             if progress_callback is not None:
-                progress_callback({
-                    "total": total,
-                    "processed": transformed,
-                    "failed": failed,
-                    "by_tier": dict(by_tier),
-                    "body_full": body_full,
-                    "body_chunked": body_chunked,
-                    "batch_num": batch_num,
-                    "total_batches": total_batches,
-                })
+                progress_callback(
+                    {
+                        "total": total,
+                        "processed": transformed,
+                        "failed": failed,
+                        "by_tier": dict(by_tier),
+                        "body_full": body_full,
+                        "body_chunked": body_chunked,
+                        "batch_num": batch_num,
+                        "total_batches": total_batches,
+                    }
+                )
         return {
             "transformed": transformed,
             "failed": failed,
@@ -253,13 +275,19 @@ class TransformPipeline:
             "body_chunked": body_chunked,
         }
 
-    def _load_label_maps_for_accounts(self, account_ids: list[int]) -> dict[int, dict[str, str]]:
+    def _load_label_maps_for_accounts(
+        self, account_ids: list[int]
+    ) -> dict[int, dict[str, str]]:
         if not account_ids:
             return {}
         account_ids = list(set(account_ids))
-        rows = self.db.execute(
-            select(AccountLabel).where(AccountLabel.account_id.in_(account_ids))
-        ).scalars().all()
+        rows = (
+            self.db.execute(
+                select(AccountLabel).where(AccountLabel.account_id.in_(account_ids))
+            )
+            .scalars()
+            .all()
+        )
         out: dict[int, dict[str, str]] = {aid: {} for aid in account_ids}
         for al in rows:
             out[al.account_id][al.label_id] = al.label_name
@@ -269,12 +297,19 @@ class TransformPipeline:
         self,
         email_ids: list[int],
         *,
-        debug_prompts_for_email_id: Optional[int] = None,
+        debug_prompts_for_email_id: int | None = None,
     ) -> dict:
         emails = [self.db.get(Email, eid) for eid in email_ids]
-        emails = [e for e in emails if e is not None and e.body_text]
+        # Keep all non-None; body_text can be empty (we still classify and set tier)
+        emails = [e for e in emails if e is not None]
         if not emails:
-            return {"ok": 0, "failed": 0, "by_tier": {}, "body_full": 0, "body_chunked": 0}
+            return {
+                "ok": 0,
+                "failed": 0,
+                "by_tier": {},
+                "body_full": 0,
+                "body_chunked": 0,
+            }
 
         account_ids = list({e.account_id for e in emails})
         label_maps = self._load_label_maps_for_accounts(account_ids)
@@ -296,13 +331,17 @@ class TransformPipeline:
         for e, res in zip(emails, results):
             if isinstance(res, Exception):
                 err_msg = _format_exception(res)
-                logger.warning("Transform failed for email id=%s (prepare): %s", e.id, err_msg)
+                logger.warning(
+                    "Transform failed for email id=%s (prepare): %s", e.id, err_msg
+                )
                 continue
             if isinstance(res, _PreparePayload):
                 payloads.append(res)
 
         if not payloads:
-            logger.warning("Batch had no successful prepares; email ids in batch: %s", email_ids)
+            logger.warning(
+                "Batch had no successful prepares; email ids in batch: %s", email_ids
+            )
             return {
                 "ok": 0,
                 "failed": len(emails),
@@ -319,7 +358,7 @@ class TransformPipeline:
             len(payloads),
         )
 
-        items: list[tuple[int, int, str, str, Optional[tuple]]] = []
+        items: list[tuple[int, int, str, str, tuple | None]] = []
         for idx, p in enumerate(payloads):
             if p.subject_text:
                 items.append((idx, p.email.id, "subject", p.subject_text, None))
@@ -327,7 +366,9 @@ class TransformPipeline:
                 items.append((idx, p.email.id, "body", p.body_text, None))
             if p.body_type == "chunked" and p.chunks:
                 for c in p.chunks:
-                    items.append((idx, p.email.id, "chunk", c.text, (c.position, c.weight)))
+                    items.append(
+                        (idx, p.email.id, "chunk", c.text, (c.position, c.weight))
+                    )
 
         n_subj = sum(1 for _ in (it for it in items if it[2] == "subject"))
         n_body = sum(1 for _ in (it for it in items if it[2] == "body"))
@@ -382,7 +423,10 @@ class TransformPipeline:
                 % (len(vectors), len(items))
             )
 
-        payload_embs: dict[int, dict] = {idx: {"subject": None, "body": None, "chunks": []} for idx in range(len(payloads))}
+        payload_embs: dict[int, dict] = {
+            idx: {"subject": None, "body": None, "chunks": []}
+            for idx in range(len(payloads))
+        }
         for (idx, _eid, role, _text, extra), vec in zip(items, vectors):
             if role == "subject":
                 payload_embs[idx]["subject"] = vec
@@ -402,12 +446,18 @@ class TransformPipeline:
             body_emb = em["body"] or []
             chunk_rows: list[tuple[str, int, float, list]] = [
                 (p.chunks[i].text, pos, weight, vec)
-                for i, (vec, pos, weight) in enumerate(sorted(em["chunks"], key=lambda x: x[1]))
+                for i, (vec, pos, weight) in enumerate(
+                    sorted(em["chunks"], key=lambda x: x[1])
+                )
             ]
-            body_pooled_emb = weighted_mean_embedding(
-                [r[3] for r in chunk_rows],
-                [r[2] for r in chunk_rows],
-            ) if chunk_rows else []
+            body_pooled_emb = (
+                weighted_mean_embedding(
+                    [r[3] for r in chunk_rows],
+                    [r[2] for r in chunk_rows],
+                )
+                if chunk_rows
+                else []
+            )
 
             try:
                 _validate_transform_result(
@@ -433,7 +483,7 @@ class TransformPipeline:
             p.email.subject_embedding = subject_emb if subject_emb else None
             p.email.body_embedding = body_emb if body_emb else None
             p.email.body_pooled_embedding = body_pooled_emb if body_pooled_emb else None
-            p.email.transform_completed_at = datetime.now(timezone.utc)
+            p.email.transform_completed_at = datetime.now(UTC)
 
             self.db.execute(delete(EmailChunk).where(EmailChunk.email_id == p.email.id))
             for text, pos, weight, vec in chunk_rows:
@@ -473,15 +523,21 @@ class TransformPipeline:
         self,
         email: Email,
         *,
-        label_id_to_name: Optional[dict[str, str]] = None,
-        debug_prompts_for_email_id: Optional[int] = None,
+        label_id_to_name: dict[str, str] | None = None,
+        debug_prompts_for_email_id: int | None = None,
     ) -> _PreparePayload:
         raw_body = email.body_text or ""
         subject = email.subject or ""
         sender = (
-            f"{email.from_name} <{email.from_email}>" if (email.from_name and email.from_name.strip()) else (email.from_email or "")
+            f"{email.from_name} <{email.from_email}>"
+            if (email.from_name and email.from_name.strip())
+            else (email.from_email or "")
         )
-        logger.debug("Prepare email id=%s subject=%r", email.id, (subject[:60] + "…") if len(subject) > 60 else subject)
+        logger.debug(
+            "Prepare email id=%s subject=%r",
+            email.id,
+            (subject[:60] + "…") if len(subject) > 60 else subject,
+        )
         body_type: str = "none"
 
         body_cleaned = preprocess_body_for_embedding(
@@ -497,7 +553,8 @@ class TransformPipeline:
 
         debug_email_id = (
             debug_prompts_for_email_id
-            if debug_prompts_for_email_id is not None and email.id == debug_prompts_for_email_id
+            if debug_prompts_for_email_id is not None
+            and email.id == debug_prompts_for_email_id
             else None
         )
         classification = await self.privacy.classify(
@@ -520,17 +577,26 @@ class TransformPipeline:
         )
         detected_lang = await asyncio.to_thread(detect_language, body_cleaned)
         body_redacted = full_redact_for_display(body_cleaned, lang=detected_lang)
-        logger.debug("Email id=%s redacted (%s, lang=%s)", email.id, tier_name, detected_lang)
+        logger.debug(
+            "Email id=%s redacted (%s, lang=%s)", email.id, tier_name, detected_lang
+        )
 
-        if privacy_tier == PrivacyTier.SENSITIVE or privacy_tier == PrivacyTier.PERSONAL:
+        if (
+            privacy_tier == PrivacyTier.SENSITIVE
+            or privacy_tier == PrivacyTier.PERSONAL
+        ):
             snippet_redacted = SNIPPET_REDACTED_PLACEHOLDER
         else:
             raw_snippet = (email.snippet or "").strip()
-            snippet_redacted = full_redact_for_display(raw_snippet, lang=detected_lang) if raw_snippet else ""
+            snippet_redacted = (
+                full_redact_for_display(raw_snippet, lang=detected_lang)
+                if raw_snippet
+                else ""
+            )
 
         text_to_embed = (body_cleaned or "").strip() or None
         subject_text = (subject or "").strip() if (subject or "").strip() else ""
-        body_text: Optional[str] = None
+        body_text: str | None = None
         chunks: list[Chunk] = []
         max_tokens = get_embed_max_tokens()
 
@@ -539,11 +605,20 @@ class TransformPipeline:
             if token_count <= max_tokens:
                 body_type = "full"
                 body_text = text_to_embed
-                logger.debug("Email id=%s body fits (%s tokens), will embed full body", email.id, token_count)
+                logger.debug(
+                    "Email id=%s body fits (%s tokens), will embed full body",
+                    email.id,
+                    token_count,
+                )
             else:
                 body_type = "chunked"
                 chunks = chunk_body(text_to_embed, self.embedder, max_tokens=max_tokens)
-                logger.debug("Email id=%s body long (%s tokens), %s chunks", email.id, token_count, len(chunks))
+                logger.debug(
+                    "Email id=%s body long (%s tokens), %s chunks",
+                    email.id,
+                    token_count,
+                    len(chunks),
+                )
 
         return _PreparePayload(
             email=email,
@@ -557,4 +632,3 @@ class TransformPipeline:
             subject_text=subject_text,
             body_text=body_text,
         )
-

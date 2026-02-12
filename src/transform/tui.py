@@ -1,6 +1,7 @@
 import logging
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from rich.console import Console, Group, RenderableType
 from rich.layout import Layout
@@ -56,7 +57,11 @@ def _styled_log_line(levelno: int, line: str, max_width: int | None = None) -> T
         style = STYLE_WARNING
     else:
         style = STYLE_VALUE
-    text = line if max_width is None or len(line) <= max_width else line[: max_width - 1] + "…"
+    text = (
+        line
+        if max_width is None or len(line) <= max_width
+        else line[: max_width - 1] + "…"
+    )
     return Text(text, style=style)
 
 
@@ -192,7 +197,9 @@ def run_transform_with_tui(
             stats.add_row(f"[{STYLE_VALUE}]Pub[/]", f"[{STYLE_VALUE}]{pub:,}[/]")
             stats.add_row("", "")
             stats.add_row(f"[{STYLE_VALUE}]Full[/]", f"[{STYLE_VALUE}]{b_full:,}[/]")
-            stats.add_row(f"[{STYLE_VALUE}]Chunk[/]", f"[{STYLE_VALUE}]{b_chunked:,}[/]")
+            stats.add_row(
+                f"[{STYLE_VALUE}]Chunk[/]", f"[{STYLE_VALUE}]{b_chunked:,}[/]"
+            )
 
             stats_panel = Panel(
                 stats,

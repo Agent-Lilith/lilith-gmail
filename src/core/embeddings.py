@@ -1,18 +1,30 @@
+import asyncio
+import logging
+
+import httpx
 from common.embeddings import Embedder as SharedEmbedder
+
 from core.config import settings
 from core.models import EMBEDDING_DIM
 
+logger = logging.getLogger(__name__)
+
+
 class Embedder(SharedEmbedder):
-    def __init__(self, endpoint_url: Optional[str] = None) -> None:
+    def __init__(self, endpoint_url: str | None = None) -> None:
         super().__init__(endpoint_url or settings.EMBEDDING_URL, dim=EMBEDDING_DIM)
         if not self.endpoint_url:
-            logger.warning("EMBEDDING_URL not set; transform and semantic search will fail for embedding")
+            logger.warning(
+                "EMBEDDING_URL not set; transform and semantic search will fail for embedding"
+            )
         else:
-            logger.info("Embedder: TEI at %s (dim=%s)", self.endpoint_url, EMBEDDING_DIM)
+            logger.info(
+                "Embedder: TEI at %s (dim=%s)", self.endpoint_url, EMBEDDING_DIM
+            )
 
     def _sync_post(
-        self, text: Union[str, List[str]], path: str = "/embed"
-    ) -> Union[List[float], List[List[float]]]:
+        self, text: str | list[str], path: str = "/embed"
+    ) -> list[float] | list[list[float]]:
         if not text:
             return [] if isinstance(text, list) else [0.0] * EMBEDDING_DIM
         if not self.endpoint_url:
@@ -33,11 +45,13 @@ class Embedder(SharedEmbedder):
             return data
         return data
 
-    def tokenize(self, text: str) -> List[int]:
+    def tokenize(self, text: str) -> list[int]:
         if not text:
             return []
         if not self.endpoint_url:
-            raise RuntimeError("EMBEDDING_URL is not set. Tokenize requires a running TEI server.")
+            raise RuntimeError(
+                "EMBEDDING_URL is not set. Tokenize requires a running TEI server."
+            )
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(
                 f"{self.endpoint_url}/tokenize",
@@ -54,18 +68,14 @@ class Embedder(SharedEmbedder):
     def token_count(self, text: str) -> int:
         return len(self.tokenize(text))
 
-    async def encode(
-        self, text: Union[str, List[str]]
-    ) -> Union[List[float], List[List[float]]]:
+    async def encode(self, text: str | list[str]) -> list[float] | list[list[float]]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._sync_post, text, "/embed")
 
-    def encode_sync(
-        self, text: Union[str, List[str]]
-    ) -> Union[List[float], List[List[float]]]:
+    def encode_sync(self, text: str | list[str]) -> list[float] | list[list[float]]:
         return self._sync_post(text, "/embed")
 
-    def _embed_one(self, text: str) -> List[float]:
+    def _embed_one(self, text: str) -> list[float]:
         result = self._sync_post([text], "/embed")
         if not isinstance(result, list) or len(result) != 1:
             raise ValueError("TEI /embed returned unexpected shape for single text")
@@ -95,12 +105,12 @@ class Embedder(SharedEmbedder):
 
     def encode_batch(
         self,
-        texts: List[str],
+        texts: list[str],
         batch_size: int = 4,
-        max_chars_per_input: Optional[int] = None,
-        max_tokens_per_input: Optional[int] = None,
-        log_context: Optional[str] = None,
-    ) -> List[List[float]]:
+        max_chars_per_input: int | None = None,
+        max_tokens_per_input: int | None = None,
+        log_context: str | None = None,
+    ) -> list[list[float]]:
         if not texts:
             return []
         if max_chars_per_input is not None and max_chars_per_input > 0:
@@ -126,12 +136,14 @@ class Embedder(SharedEmbedder):
                     cap,
                 )
         n = len(texts)
-        out: List[List[float]] = []
+        out: list[list[float]] = []
         num_batches = (n + batch_size - 1) // batch_size
         for i in range(0, n, batch_size):
             sub = texts[i : i + batch_size]
             batch_num = i // batch_size + 1
-            ctx = (log_context + ", " if log_context else "") + "sub-batch %s/%s (%s texts)" % (
+            ctx = (
+                log_context + ", " if log_context else ""
+            ) + "sub-batch %s/%s (%s texts)" % (
                 batch_num,
                 num_batches,
                 len(sub),
@@ -185,13 +197,21 @@ class Embedder(SharedEmbedder):
                     "TEI /embed batch length mismatch: got %s vectors for %s texts (%s)"
                     % (len(vecs), len(sub), ctx)
                 )
-            for v in vecs:
-                if not isinstance(v, list) or len(v) != EMBEDDING_DIM:
+            for vec in vecs:
+                if not isinstance(vec, list) or len(vec) != EMBEDDING_DIM:
                     raise ValueError(
                         "TEI /embed returned invalid vector (dim %s, expected %s) in %s"
-                        % (len(v) if isinstance(v, list) else "non-list", EMBEDDING_DIM, ctx)
+                        % (
+                            len(vec) if isinstance(vec, list) else "non-list",
+                            EMBEDDING_DIM,
+                            ctx,
+                        )
                     )
-                out.append(list(v))
+                else:
+                    out.append(list(vec))
         if len(out) != n:
-            raise ValueError("Embed batch total length mismatch: got %s vectors for %s texts" % (len(out), n))
+            raise ValueError(
+                "Embed batch total length mismatch: got %s vectors for %s texts"
+                % (len(out), n)
+            )
         return out

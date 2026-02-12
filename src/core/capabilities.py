@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -14,7 +14,12 @@ CHARS_PER_TOKEN = 4
 
 def probe_embedding() -> dict[str, Any]:
     url = (settings.EMBEDDING_URL or "").rstrip("/")
-    out: dict[str, Any] = {"url": url or None, "max_tokens": None, "max_chars": None, "source": None}
+    out: dict[str, Any] = {
+        "url": url or None,
+        "max_tokens": None,
+        "max_chars": None,
+        "source": None,
+    }
     if not url:
         return out
 
@@ -61,8 +66,8 @@ def probe_vllm() -> dict[str, Any]:
             r.raise_for_status()
             data = r.json()
             models = data.get("data") or []
-            server_max: Optional[int] = None
-            model_id: Optional[str] = None
+            server_max: int | None = None
+            model_id: str | None = None
             for m in models:
                 if not isinstance(m, dict):
                     continue

@@ -1,17 +1,18 @@
 from common.config import BaseAgentSettings
-from typing import List, Optional
+from cryptography.fernet import Fernet
+
 
 class Settings(BaseAgentSettings):
     EMAIL_ENCRYPTION_KEY: str = ""
     GOOGLE_CLOUD_PROJECT: str = ""
     PUBSUB_TOPIC: str = ""
-    GMAIL_SCOPES: List[str] = [
+    PUBSUB_SUBSCRIPTION: str = ""
+    GMAIL_SCOPES: list[str] = [
         "https://www.googleapis.com/auth/gmail.readonly",
     ]
-    SPACY_API_URL: str = ""
-    FASTTEXT_LANGDETECT_URL: str = ""
     WEBHOOK_URL: str = ""
-    MCP_EMAIL_ACCOUNT_ID: Optional[int] = None
+    MCP_EMAIL_ACCOUNT_ID: int | None = None
+
 
 settings = Settings()
 

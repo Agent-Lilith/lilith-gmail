@@ -1,13 +1,22 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
+from typing import Any
+
 from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from core.email_utils import parse_date, parse_email_address, parse_email_list
+from core.models import (
+    AccountLabel,
+    Email,
+    EmailAccount,
+    EmailAttachment,
+    EmailThread,
+    SyncEvent,
+)
 
 from .gmail_client import GmailClient
-from core.models import AccountLabel, Email, EmailAccount, EmailAttachment, EmailThread, SyncEvent
-from core.email_utils import parse_date, parse_email_address, parse_email_list
 
 logger = logging.getLogger(__name__)
 
@@ -23,19 +32,25 @@ class SyncWorker:
         except Exception as e:
             logger.warning("Failed to fetch labels for account %s: %s", account_id, e)
             return
-        self.db.execute(delete(AccountLabel).where(AccountLabel.account_id == account_id))
+        self.db.execute(
+            delete(AccountLabel).where(AccountLabel.account_id == account_id)
+        )
         for lb in raw:
             label_id = lb.get("id") or ""
             name = lb.get("name") or label_id
             if label_id:
-                self.db.add(AccountLabel(account_id=account_id, label_id=label_id, label_name=name))
+                self.db.add(
+                    AccountLabel(
+                        account_id=account_id, label_id=label_id, label_name=name
+                    )
+                )
         self.db.commit()
         logger.info("Synced %s labels for account %s", len(raw), account_id)
 
     async def full_sync(
         self,
         account_id: int,
-        limit: Optional[int] = 1000,
+        limit: int | None = 1000,
         concurrency: int = 10,
     ):
         account = self.db.get(EmailAccount, account_id)
@@ -72,9 +87,13 @@ class SyncWorker:
                 logger.info(
                     "Fetching message list (page %s, max_results=500)%s",
                     page_num,
-                    f", page_token=...{page_token[-8:] if page_token else ''}" if page_token else "",
+                    f", page_token=...{page_token[-8:] if page_token else ''}"
+                    if page_token
+                    else "",
                 )
-                response = self.gmail.list_messages(max_results=500, page_token=page_token)
+                response = self.gmail.list_messages(
+                    max_results=500, page_token=page_token
+                )
                 messages = response.get("messages", [])
 
                 if not messages:
@@ -97,7 +116,9 @@ class SyncWorker:
                 new_count = 0
                 for i, res in enumerate(results):
                     if isinstance(res, Exception):
-                        logger.warning("Failed to process message %s: %s", messages[i]["id"], res)
+                        logger.warning(
+                            "Failed to process message %s: %s", messages[i]["id"], res
+                        )
                         if not _logged_403_hint and "403" in str(res):
                             _logged_403_hint = True
                             logger.info(
@@ -153,13 +174,15 @@ class SyncWorker:
 
     async def _process_email_with_sem(
         self, sem: asyncio.Semaphore, account_id: int, gmail_id: str
-    ) -> Optional[Email]:
+    ) -> Email | None:
         async with sem:
             return await self.process_email(account_id, gmail_id)
 
-    async def process_email(self, account_id: int, gmail_id: str) -> Optional[Email]:
+    async def process_email(self, account_id: int, gmail_id: str) -> Email | None:
         existing = self.db.execute(
-            select(Email).where(Email.gmail_id == gmail_id).where(Email.deleted_at.is_(None))
+            select(Email)
+            .where(Email.gmail_id == gmail_id)
+            .where(Email.deleted_at.is_(None))
         ).scalar_one_or_none()
         if existing:
             logger.debug("Skip (already stored): gmail_id=%s", gmail_id)
@@ -206,12 +229,14 @@ class SyncWorker:
         await self._update_thread(account_id, msg["threadId"], subject)
         return email
 
-    async def _process_attachments(self, email: Email, payload: Dict[str, Any]) -> None:
+    async def _process_attachments(self, email: Email, payload: dict[str, Any]) -> None:
         if "parts" not in payload:
             return
         for part in payload.get("parts", []):
             if part.get("filename") and part["body"].get("attachmentId"):
-                part_headers = {h["name"].lower(): h["value"] for h in part.get("headers", [])}
+                part_headers = {
+                    h["name"].lower(): h["value"] for h in part.get("headers", [])
+                }
                 disp = part_headers.get("content-disposition", "")
                 att = EmailAttachment(
                     email_id=email.id,
@@ -224,7 +249,9 @@ class SyncWorker:
                 self.db.add(att)
                 email.attachment_count += 1
 
-    async def incremental_sync(self, account_id: int, start_history_id: int | None) -> None:
+    async def incremental_sync(
+        self, account_id: int, start_history_id: int | None
+    ) -> None:
         account = self.db.get(EmailAccount, account_id)
         if not account:
             logger.error("Account %s not found", account_id)
@@ -242,7 +269,9 @@ class SyncWorker:
             start_history_id,
         )
 
-        sync_event = SyncEvent(account_id=account_id, event_type="incremental", status="started")
+        sync_event = SyncEvent(
+            account_id=account_id, event_type="incremental", status="started"
+        )
         self.db.add(sync_event)
         self.db.commit()
 
@@ -286,7 +315,9 @@ class SyncWorker:
             sync_event.completed_at = datetime.now()
             self.db.commit()
 
-            logger.info("Incremental sync completed: %s messages added/updated", processed)
+            logger.info(
+                "Incremental sync completed: %s messages added/updated", processed
+            )
 
         except Exception as e:
             logger.exception("Incremental sync failed")

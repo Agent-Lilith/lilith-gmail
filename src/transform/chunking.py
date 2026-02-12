@@ -1,10 +1,8 @@
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional
 
 from core.embeddings import Embedder
-from core.capabilities_loader import get_embed_max_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +16,7 @@ class Chunk:
     weight: float
 
 
-def _split_into_paragraphs(text: str) -> List[str]:
+def _split_into_paragraphs(text: str) -> list[str]:
     if not text.strip():
         return []
     text = re.sub(r"\r\n?", "\n", text)
@@ -31,7 +29,7 @@ def chunk_body(
     embedder: Embedder,
     max_tokens: int = 8192,
     target_chunk_tokens: int = CHUNK_TARGET_TOKENS,
-) -> List[Chunk]:
+) -> list[Chunk]:
     if not body or not body.strip():
         return []
     token_count = embedder.token_count(body)
@@ -44,8 +42,8 @@ def chunk_body(
         sentences = re.split(r"(?<=[.!?])\s+", body)
         paragraphs = [s.strip() for s in sentences if s.strip()] or [body]
 
-    chunks: List[Chunk] = []
-    current: List[str] = []
+    chunks: list[Chunk] = []
+    current: list[str] = []
     current_tokens = 0
     position = 0
 
@@ -62,7 +60,9 @@ def chunk_body(
                 if current_tokens + st > target_chunk_tokens and current:
                     chunk_text = "\n\n".join(current)
                     weight = 2.0 if position == 0 else 1.0
-                    chunks.append(Chunk(text=chunk_text, position=position, weight=weight))
+                    chunks.append(
+                        Chunk(text=chunk_text, position=position, weight=weight)
+                    )
                     position += 1
                     current = []
                     current_tokens = 0
@@ -89,8 +89,8 @@ def chunk_body(
 
 
 def weighted_mean_embedding(
-    embeddings: List[List[float]], weights: List[float]
-) -> List[float]:
+    embeddings: list[list[float]], weights: list[float]
+) -> list[float]:
     if not embeddings or not weights or len(embeddings) != len(weights):
         return []
     dim = len(embeddings[0])

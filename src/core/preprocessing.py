@@ -1,7 +1,6 @@
-import re
 import logging
+import re
 import unicodedata
-from typing import Optional
 
 from core.config import settings
 
@@ -64,9 +63,7 @@ def strip_tracking_urls_from_text(text: str) -> str:
 
 # Format, Control, Private Use, Not Assigned (strip fingerprinting / noise)
 INVISIBLE_UNICODE_CATEGORIES = {"Cf", "Cc", "Co", "Cn"}
-ZERO_WIDTH_CHARS = (
-    "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2060\u2061\u2062\u2063\ufeff"
-)
+ZERO_WIDTH_CHARS = "\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2060\u2061\u2062\u2063\ufeff"
 
 
 def strip_invisible_unicode(text: str) -> str:
@@ -85,6 +82,7 @@ def strip_invisible_unicode(text: str) -> str:
         result.append(c)
     return "".join(result)
 
+
 # Signature / disclaimer delimiters (e.g. "-- ", mobile "Sent from", legal blocks)
 SIGNATURE_PATTERNS = [
     r"\n\s*Sent from my (?:iPhone|iPad|Android|Samsung|Galaxy|Pixel)\b.*",
@@ -95,7 +93,9 @@ SIGNATURE_PATTERNS = [
     r"\n\s*_{5,}\s*$",
     r"\n\s*-\s{0,2}$",
 ]
-SIGNATURE_REGEX = re.compile("|".join(f"({p})" for p in SIGNATURE_PATTERNS), re.IGNORECASE | re.DOTALL)
+SIGNATURE_REGEX = re.compile(
+    "|".join(f"({p})" for p in SIGNATURE_PATTERNS), re.IGNORECASE | re.DOTALL
+)
 DISCLAIMER_STARTS = [
     r"\n\s*(?:This\s+)?(?:e-?mail|message|communication)\s+(?:is\s+)?(?:confidential|intended only).*",
     r"\n\s*Disclaimer\s*:.*",
@@ -104,7 +104,9 @@ DISCLAIMER_STARTS = [
     r"\n\s*Please consider the environment before printing.*",
     r"\n\s*\[?PRIVACY\]?.*",
 ]
-DISCLAIMER_REGEX = re.compile("|".join(f"({p})" for p in DISCLAIMER_STARTS), re.IGNORECASE | re.DOTALL)
+DISCLAIMER_REGEX = re.compile(
+    "|".join(f"({p})" for p in DISCLAIMER_STARTS), re.IGNORECASE | re.DOTALL
+)
 
 # Quoted reply boundaries: "On ... wrote:", "From: ... Sent:", "Forwarded message", etc.
 QUOTE_PATTERNS = [
@@ -116,7 +118,9 @@ QUOTE_PATTERNS = [
     r"\n\s*----------\s+Forwarded message\s+----------\s*\n",
     r"\n\s*Begin forwarded message\s*:.*",
 ]
-QUOTE_REGEX = re.compile("|".join(f"({p})" for p in QUOTE_PATTERNS), re.IGNORECASE | re.DOTALL)
+QUOTE_REGEX = re.compile(
+    "|".join(f"({p})" for p in QUOTE_PATTERNS), re.IGNORECASE | re.DOTALL
+)
 
 
 def _strip_by_first_match(text: str, regex: re.Pattern) -> str:
@@ -168,7 +172,7 @@ def preprocess_body_for_embedding(
     return text.strip()
 
 
-def _llm_extract_main_content(body: str) -> Optional[str]:
+def _llm_extract_main_content(body: str) -> str | None:
     import httpx
 
     if not body or len(body) > 12000:
@@ -194,7 +198,13 @@ def _llm_extract_main_content(body: str) -> Optional[str]:
                 },
             )
             r.raise_for_status()
-            out = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            out = (
+                r.json()
+                .get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
             return out if out else None
     except Exception as e:
         logger.debug("LLM main-content extraction failed: %s", e)

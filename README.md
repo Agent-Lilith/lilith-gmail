@@ -51,7 +51,56 @@ uv run python main.py reset-transform 1
 uv run python main.py serve
 ```
 
-Incremental sync (webhook) only downloads new/changed mail; run `transform` separately to process new messages.
+When the daemon receives a Gmail Pub/Sub push, it runs incremental sync and then transform automatically for that account.
+
+**Without a public URL (local dev):** use **pull** instead of push. Create a pull subscription, set `PUBSUB_SUBSCRIPTION` in `.env`, then run:
+
+```bash
+gcloud auth application-default login
+uv run python main.py watch 1
+# In another terminal, poll for notifications (same sync+transform as webhook):
+uv run python main.py pull
+```
+
+Create the pull subscription (same project as the topic):  
+`gcloud pubsub subscriptions create lilith-emails-pull --topic=gmail-topic --project=lilithsync`
+
+**With a public URL:** use a **push** subscription (endpoint = your public `/webhook/gmail` URL) and run the daemon with `uv run python main.py serve`. Register the watch once: `uv run python main.py watch <account_id>` (requires `GOOGLE_CLOUD_PROJECT` and `PUBSUB_TOPIC` in `.env`).
+
+**If watch returns 403:** grant Gmail permission to publish to your topic:
+
+```bash
+gcloud pubsub topics add-iam-policy-binding gmail-topic \
+  --member="serviceAccount:gmail-api-push@system.gserviceaccount.com" \
+  --role="roles/pubsub.publisher" \
+  --project=lilithsync
+```
+
+#### Testing the webhook locally
+
+You can trigger the same path without Gmail by POSTing a simulated Pub/Sub payload. First run a full sync so the account has `last_history_id`, then start the daemon and send:
+
+```bash
+# Start daemon in another terminal: uv run python main.py serve --port 8000
+
+# Replace YOUR_EMAIL and HISTORY_ID (e.g. from DB: email_accounts.last_history_id)
+# Portable (any OS):
+python3 -c "
+import base64, json, urllib.request
+d = base64.b64encode(json.dumps({'emailAddress':'YOUR_EMAIL','historyId':'HISTORY_ID'}).encode()).decode()
+urllib.request.urlopen(urllib.request.Request('http://localhost:8000/webhook/gmail', data=json.dumps({'message':{'data':d}}).encode(), headers={'Content-Type':'application/json'}, method='POST'))
+print('OK')
+"
+```
+
+Or with curl (Linux: use base64 -w0; macOS: use base64):
+
+```bash
+B64=$(echo -n '{"emailAddress":"YOUR_EMAIL","historyId":"HISTORY_ID"}' | base64)
+curl -s -X POST http://localhost:8000/webhook/gmail -H "Content-Type: application/json" -d "{\"message\":{\"data\":\"$B64\"}}"
+```
+
+The daemon will run incremental sync and then transform for that account. Use `get-email` or MCP tools to verify new or updated rows.
 
 ## Configuration
 

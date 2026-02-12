@@ -1,11 +1,11 @@
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 
 from core.config import decrypt_token, encrypt_token, settings
 
@@ -41,11 +41,11 @@ def token_from_credentials(creds: Credentials) -> bytes:
 
 def run_local_oauth(
     client_secrets_path: str,
-    token_path: Optional[str] = None,
+    token_path: str | None = None,
     prompt_consent: bool = True,
 ) -> Credentials:
     flow = InstalledAppFlow.from_client_secrets_file(client_secrets_path, SCOPES)
-    kwargs = {"port": 0}
+    kwargs: dict[str, Any] = {"port": 0}
     if prompt_consent:
         kwargs["prompt"] = "consent"
     creds = flow.run_local_server(**kwargs)

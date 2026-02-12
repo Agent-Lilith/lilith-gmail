@@ -1,4 +1,5 @@
 from common.database import DatabaseManager
+
 from .config import settings
 
 db_manager = DatabaseManager(settings.DATABASE_URL)
