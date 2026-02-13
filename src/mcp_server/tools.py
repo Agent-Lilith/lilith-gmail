@@ -28,13 +28,20 @@ def get_search_capabilities_tool() -> dict[str, Any]:
         "schema_version": "1.0",
         "source_name": "email",
         "source_class": "personal",
+        "display_label": "Email",
         "supported_methods": ["structured", "fulltext", "vector"],
         "supported_filters": [
             {
                 "name": "from_email",
                 "type": "string",
-                "operators": ["eq", "contains"],
-                "description": "Sender email address",
+                "operators": ["contains"],
+                "description": "Sender email address (partial match)",
+            },
+            {
+                "name": "from_name",
+                "type": "string",
+                "operators": ["contains"],
+                "description": "Sender display name (partial match)",
             },
             {
                 "name": "to_email",

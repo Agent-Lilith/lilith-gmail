@@ -9,7 +9,7 @@ from datetime import date, datetime
 from datetime import time as dtime
 from typing import Any
 
-from sqlalchemy import func, literal_column, select
+from sqlalchemy import func, literal_column, or_, select
 from sqlalchemy.orm import Session
 
 from core.embeddings import Embedder
@@ -62,16 +62,18 @@ def _apply_filters(stmt, filters: list[dict[str, Any]] | None, account_id: int |
     if not filters:
         return stmt
 
+    from_email_value = None
+    from_name_value = None
+
     for f in filters:
         field = f.get("field", "")
         op = f.get("operator", "eq")
         value = f.get("value")
 
         if field == "from_email" and value:
-            if op == "contains":
-                stmt = stmt.where(Email.from_email.ilike(f"%{value}%"))
-            else:
-                stmt = stmt.where(Email.from_email.ilike(f"%{value}%"))
+            from_email_value = str(value).strip()
+        elif field == "from_name" and value:
+            from_name_value = str(value).strip()
         elif field == "to_email" and value:
             # Search in to_emails array
             stmt = stmt.where(
@@ -92,6 +94,14 @@ def _apply_filters(stmt, filters: list[dict[str, Any]] | None, account_id: int |
             )
         elif field == "account_id" and value is not None:
             stmt = stmt.where(Email.account_id == int(value))
+
+    if from_email_value or from_name_value:
+        conditions = []
+        if from_email_value:
+            conditions.append(Email.from_email.ilike(f"%{from_email_value}%"))
+        if from_name_value:
+            conditions.append(Email.from_name.ilike(f"%{from_name_value}%"))
+        stmt = stmt.where(or_(*conditions))
 
     return stmt
 

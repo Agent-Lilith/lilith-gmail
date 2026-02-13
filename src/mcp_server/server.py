@@ -43,13 +43,19 @@ def unified_search(
 @mcp.tool()
 def email_get(email_id: str, account_id: int | None = None) -> dict:
     """Get a single email by Gmail message ID."""
-    return get_email_tool(email_id, account_id=account_id)
+    try:
+        return get_email_tool(email_id, account_id=account_id)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
 def email_get_thread(thread_id: str, account_id: int | None = None) -> dict:
     """Get all emails in a thread by Gmail thread ID."""
-    return get_email_thread_tool(thread_id, account_id=account_id)
+    try:
+        return get_email_thread_tool(thread_id, account_id=account_id)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @mcp.tool()
@@ -59,11 +65,14 @@ def emails_summarize(
     account_id: int | None = None,
 ) -> dict:
     """Summarize one or more emails or a full thread."""
-    return summarize_emails_tool(
-        email_ids=email_ids,
-        thread_id=thread_id,
-        account_id=account_id,
-    )
+    try:
+        return summarize_emails_tool(
+            email_ids=email_ids,
+            thread_id=thread_id,
+            account_id=account_id,
+        )
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def main(transport: str | None = None, port: int | None = None) -> int:
