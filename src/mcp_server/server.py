@@ -29,14 +29,20 @@ def unified_search(
     filters: list[dict] | None = None,
     top_k: int = 10,
     account_id: int | None = None,
+    mode: str = "search",
+    group_by: str | None = None,
+    aggregate_top_n: int = 10,
 ) -> dict:
-    """Hybrid search over emails (structured + fulltext + vector)."""
+    """Hybrid search over emails (structured + fulltext + vector). Supports search, count, aggregate."""
     return search_emails_unified_tool(
         query=query,
         methods=methods,
         filters=filters,
         top_k=top_k,
         account_id=account_id,
+        mode=mode,
+        group_by=group_by,
+        aggregate_top_n=aggregate_top_n,
     )
 
 

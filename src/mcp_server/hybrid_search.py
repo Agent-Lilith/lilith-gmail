@@ -251,6 +251,58 @@ class HybridEmailSearchEngine(BaseHybridSearchEngine[Email]):
             "error": None,
         }
 
+    def count(
+        self,
+        filters: list[dict] | None = None,
+        account_id: int | None = None,
+    ) -> dict:
+        """Return total count of matching emails."""
+        stmt = select(func.count()).select_from(Email)
+        stmt = _apply_filters(stmt, filters, account_id)
+        total = self.db.execute(stmt).scalar() or 0
+        return {
+            "results": [],
+            "total_available": total,
+            "count": total,
+            "mode": "count",
+            "methods_executed": ["count"],
+            "timing_ms": {},
+            "error": None,
+        }
+
+    def aggregate(
+        self,
+        group_by: str,
+        filters: list[dict] | None = None,
+        account_id: int | None = None,
+        top_n: int = 10,
+    ) -> dict:
+        """Return top groups by count. group_by: from_email or from_name."""
+        col = Email.from_email if group_by == "from_email" else Email.from_name
+        stmt = select(col, func.count().label("cnt"))
+        stmt = _apply_filters(stmt, filters, account_id)
+        stmt = stmt.where(col.isnot(None)).where(col != "")
+        stmt = stmt.group_by(col).order_by(func.count().desc()).limit(top_n)
+        rows = self.db.execute(stmt).all()
+        aggregates = [
+            {
+                "group_value": str(row[0] or ""),
+                "count": row[1],
+                "label": str(row[0] or ""),
+                "metadata": {},
+            }
+            for row in rows
+        ]
+        return {
+            "results": [],
+            "total_available": 0,
+            "mode": "aggregate",
+            "aggregates": aggregates,
+            "methods_executed": ["aggregate"],
+            "timing_ms": {},
+            "error": None,
+        }
+
     def _get_item_by_id(
         self, item_id: str, account_id: int | None = None, **kwargs
     ) -> Email | None:

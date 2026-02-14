@@ -84,6 +84,8 @@ def get_search_capabilities_tool() -> dict[str, Any]:
         "default_limit": 10,
         "sort_fields": ["sent_at", "relevance"],
         "default_ranking": "vector",
+        "supported_modes": ["search", "count", "aggregate"],
+        "supported_group_by_fields": ["from_email", "from_name"],
     }
 
 
@@ -93,13 +95,26 @@ def search_emails_unified_tool(
     filters: list[dict] | None = None,
     top_k: int = 10,
     account_id: int | None = None,
+    mode: str = "search",
+    group_by: str | None = None,
+    aggregate_top_n: int = 10,
 ) -> dict:
-    """Hybrid search over emails."""
+    """Hybrid search over emails. Supports search, count, and aggregate modes."""
     aid = _resolve_account_id(account_id)
     top_k = min(max(1, top_k), 100)
+    aggregate_top_n = min(max(1, aggregate_top_n), 100)
 
     with db_session() as db:
         engine = HybridEmailSearchEngine(db, Embedder())
+        if mode == "count":
+            return engine.count(filters=filters, account_id=aid)
+        if mode == "aggregate" and group_by in ("from_email", "from_name"):
+            return engine.aggregate(
+                group_by=group_by,
+                filters=filters,
+                account_id=aid,
+                top_n=aggregate_top_n,
+            )
         response = engine.search(
             query=query,
             methods=methods,
