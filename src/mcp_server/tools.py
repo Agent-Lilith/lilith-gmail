@@ -25,10 +25,15 @@ def _resolve_account_id(account_id: int | None) -> int | None:
 def get_search_capabilities_tool() -> dict[str, Any]:
     """Return capabilities for this email search server."""
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.2",
         "source_name": "email",
         "source_class": "personal",
         "display_label": "Email",
+        "alias_hints": ["gmail", "inbox"],
+        "freshness_window_days": 1,
+        "latency_tier": "low",
+        "quality_tier": "high",
+        "cost_tier": "low",
         "supported_methods": ["structured", "fulltext", "vector"],
         "supported_filters": [
             {
